@@ -1,0 +1,5016 @@
+# file opened: hccmd.asm
+   1  0000              	DEVICE ZXSPECTRUM48
+   2  0000
+   3  0000              RUN_ADDR		EQU	32768
+   4  0000
+   5  0000              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+   6  0000
+   7  0000              ;Define bellow is commented out to include the font binary in RAM, to make it work with Spectaculator HC-2000 emulator by Rares Atodiresei, which doesn't seem to implement the paging.
+   8  0000              ;If not commented out, it will use the font table in the CPM ROM and the binary will be smaller.
+   9  0000              	define  _ROM_FNT_
+  10  0000
+  11  0000              	org RUN_ADDR
+  12  8000
+  13  8000              Start:
+  14  8000              	ifdef _ROM_FNT_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
+  15  8000 CD 0A 87     	call InitFonts
+  16  8003              	endif
+  17  8003 CD 42 89     	call IF1Init
+  18  8006
+  19  8006              	;install error handler
+  20  8006 2A 3D 5C     	ld		hl, (ERRSP)
+  21  8009 E5           	push	hl
+  22  800A 21 5A 80     	ld		hl, ErrorHandler
+  23  800D E5           	push	hl
+  24  800E ED 73 3D 5C  	ld		(ERRSP), sp
+  25  8012
+  26  8012              HCRunInitDisk:
+  27  8012              	;Clear file cache
+  28  8012 21 73 92     	ld		hl, UnallocStart
+  29  8015 54           	ld		d, h
+  30  8016 5D           	ld		e, l
+  31  8017 13           	inc		de
+  32  8018 01 8A 0C     	ld		bc, TrackBuf - UnallocStart
+  33  801B 36 00        	ld		(hl), 0
+  34  801D ED B0        	ldir
+  35  801F              	;Set track buffer to del marker
+  36  801F 01 00 10     	ld		bc, SPT*SECT_SZ
+  37  8022 36 E5        	ld		(hl), DEL_MARKER
+  38  8024 ED B0        	ldir
+  39  8026
+  40  8026              	;main program
+  41  8026 CD 16 8B     	call 	ReadCatalogTrack
+  42  8029 B7           	or		a					;Signal disk read error. On empty drive code 5 is shown.
+  43  802A 28 1C        	jr		z, HCRunMain
+  44  802C
+  45  802C 6F           	ld		l, a
+  46  802D 26 00        	ld		h, 0
+  47  802F 11 07 91     	ld		de, MsgErrCode
+  48  8032 CD D2 88     	call	Byte2Txt
+  49  8035 21 FC 90     	ld		hl, MsgErr
+  50  8038 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+  51  803B 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+  52  803D CD 68 87     	call	PrintStrClr
+  53  8040 CD 04 87     	call	ReadChar
+  54  8043 3E 00        	ld		a, DRIVE_A_CPM		;Reset drive to A in case B was selected but was empty.
+  55  8045 32 C6 8B     	ld		(RWTSDrive), a
+  56  8048
+  57  8048              HCRunMain:
+  58  8048 CD 8C 80     	call 	InitUI
+  59  804B CD FD 83     	call 	GetFileNames
+  60  804E CD 0C 81     	call	DisplayDiskInfo
+  61  8051 C3 66 81     	jp		ReadKeyLoop
+  62  8054
+  63  8054              HCRunEnd:
+  64  8054              	;restore error handler
+  65  8054 E1           	pop		hl
+  66  8055 E1           	pop		hl
+  67  8056 22 3D 5C     	ld		(ERRSP), hl
+  68  8059
+  69  8059 C9           	ret
+  70  805A
+  71  805A              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  72  805A
+  73  805A              ErrorHandler:
+  74  805A E1           	pop		hl
+  75  805B 22 3D 5C     	ld		(ERRSP), hl
+  76  805E
+  77  805E 3A 3A 5C     	ld		a, (ERRNR)		;make something with the error code, display the error message maybe.
+  78  8061 6F           	ld		l, a
+  79  8062 26 00        	ld		h, 0
+  80  8064 11 07 91     	ld		de, MsgErrCode
+  81  8067 CD D2 88     	call	Byte2Txt
+  82  806A 21 FC 90     	ld		hl, MsgErr
+  83  806D 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+  84  8070 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+  85  8072 CD 68 87     	call	PrintStrClr
+  86  8075
+  87  8075 3A 3A 5C     	ld		a, (ERRNR)
+  88  8078 CD 9C 8B     	call	GetErrMsg
+  89  807B
+  90  807B 21 C9 B2     	ld		hl, DataBuf
+  91  807E 11 00 0F     	ld		de, LST_LINE_MSG + 2 << 8
+  92  8081 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+  93  8083 CD 68 87     	call	PrintStrClr
+  94  8086
+  95  8086 CD 04 87     	call	ReadChar
+  96  8089 C3 00 80     	jp	Start
+  97  808C
+  98  808C
+  99  808C
+ 100  808C
+ 101  808C              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 102  808C
+ 103  808C              InitUI:
+ 104  808C AF           	xor		a
+ 105  808D 32 75 92     	ld		(SelFile), A
+ 106  8090 32 73 92     	ld		(FileCnt), A
+ 107  8093 3E 11        	ld		a, LST_FIRST_COL + 1
+ 108  8095 32 74 92     	ld		(NameCol), A
+ 109  8098
+ 110  8098 21 08 00     	ld		hl, SCR_BYTES_PER_LINE * LST_FIRST_LINE + LST_FIRST_COL/2
+ 111  809B ED 4B C5 88  	ld		bc, (CurrScrAttrAddr)
+ 112  809F 09           	add		hl, bc
+ 113  80A0 22 76 92     	ld		(CursorAddr), hl
+ 114  80A3
+ 115  80A3 CD 20 87     	call	ClrScr
+ 116  80A6
+ 117  80A6 3E 84        	ld		a, CHR_DC
+ 118  80A8 CD E1 87     	call	DrawVLines
+ 119  80AB
+ 120  80AB 3E 28        	ld		a, SCR_LBL_CLR
+ 121  80AD 11 00 17     	ld		de, 23 << 8
+ 122  80B0 21 8D 90     	ld		hl, BtnBar
+ 123  80B3 CD 68 87     	call	PrintStrClr
+ 124  80B6
+ 125  80B6
+ 126  80B6 21 2D 90     	ld		hl, VerMsg1
+ 127  80B9 11 00 00     	ld		de, LST_FIRST_LINE << 8
+ 128  80BC CD 40 87     	call	PrintStr
+ 129  80BF 21 3D 90     	ld		hl, VerMsg2
+ 130  80C2 11 00 01     	ld		de, LST_FIRST_LINE + 1 << 8
+ 131  80C5 CD 40 87     	call	PrintStr
+ 132  80C8 21 4D 90     	ld		hl, VerMsg3
+ 133  80CB 11 00 02     	ld		de, LST_FIRST_LINE + 2 << 8
+ 134  80CE CD 40 87     	call	PrintStr
+ 135  80D1
+ 136  80D1
+ 137  80D1 3E 28        	ld		a, SCR_LBL_CLR
+ 138  80D3 21 5D 90     	ld		hl, MsgDskInf
+ 139  80D6 11 00 03     	ld		de, LST_DISK_INFO << 8
+ 140  80D9 CD 68 87     	call	PrintStrClr
+ 141  80DC
+ 142  80DC 3E 28        	ld		a, SCR_LBL_CLR
+ 143  80DE 21 6D 90     	ld		hl, MsgFileInf
+ 144  80E1 11 00 07     	ld		de, LST_FILE_INFO << 8
+ 145  80E4 CD 68 87     	call	PrintStrClr
+ 146  80E7
+ 147  80E7 3E 28        	ld		a, SCR_LBL_CLR
+ 148  80E9 21 7D 90     	ld		hl, MsgMessages
+ 149  80EC 11 00 0D     	ld		de, LST_LINE_MSG << 8
+ 150  80EF CD 68 87     	call	PrintStrClr
+ 151  80F2
+ 152  80F2 11 11 00     	ld		de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
+ 153  80F5 ED 53 B0 5C  	ld		(LineCol), de
+ 154  80F9 21 79 92     	ld		hl, AUCnt
+ 155  80FC 11 00 00     	ld		de, 0
+ 156  80FF 73 23 72 2B  	ld		(hl), de
+ 157  8103
+ 158  8103 3E 28        	ld		a, SCR_SEL_CLR
+ 159  8105 CD 00 88     	call	DrawCursor
+ 160  8108
+ 161  8108 CD 91 8B     	call	SetFastKeys
+ 162  810B
+ 163  810B C9           	ret
+ 164  810C
+ 165  810C
+ 166  810C              DisplayDiskInfo:
+ 167  810C 3A C6 8B     	ld		a, (RWTSDrive)
+ 168  810F C6 C1        	add		'A' + $80
+ 169  8111 32 DB 90     	ld		(MsgDriveLet), a
+ 170  8114 21 CC 90     	ld		hl, MsgDrive
+ 171  8117 11 00 04     	ld		de, LST_DISK_INFO + 1 << 8
+ 172  811A CD 40 87     	call	PrintStr
+ 173  811D
+ 174  811D 3A 73 92     	ld		a, (FileCnt)
+ 175  8120 6F           	ld		l, a
+ 176  8121 26 00        	ld		h, 0
+ 177  8123 11 E5 90     	ld		de, MsgFilesCntNo
+ 178  8126 CD D2 88     	call	Byte2Txt
+ 179  8129 21 DC 90     	ld		hl, MsgFilesCnt
+ 180  812C 11 00 05     	ld		de, LST_DISK_INFO + 2 << 8
+ 181  812F CD 40 87     	call	PrintStr
+ 182  8132
+ 183  8132 ED 5B 79 92  	ld		de, (AUCnt)
+ 184  8136 21 3E 01     	ld		hl, MAX_FREE_AU_CNT
+ 185  8139 B7           	or		a
+ 186  813A ED 52        	sbc		hl, de
+ 187  813C CB 15        	rl		l								;*2, 2K/AU
+ 188  813E CB 14        	rl		h
+ 189  8140 11 F3 90     	ld		de, MsgFreeSpaceNo - 2
+ 190  8143 CD C7 88     	call	Word2Txt
+ 191  8146 3E 3A        	ld		a, ':'
+ 192  8148 32 F4 90     	ld		(MsgFreeSpaceNo -1), a
+ 193  814B 21 EC 90     	ld		hl, MsgFreeSpace
+ 194  814E 11 00 06     	ld		de, LST_DISK_INFO + 3 << 8
+ 195  8151 CD 40 87     	call	PrintStr
+ 196  8154
+ 197  8154 C9           	ret
+ 198  8155
+ 199  8155              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 200  8155
+ 201  8155              CalcFileCache:
+ 202  8155 3A 75 92     	ld		a, (SelFile)
+ 203  8158 11 19 00     	ld		de, CACHE_SZ
+ 204  815B CD 2E 89     	call	Mul
+ 205  815E 01 7D 92     	ld		bc, FileCache
+ 206  8161 09           	add		hl, bc					;HL = file AU cnt
+ 207  8162 22 7B 92     	ld		(SelFileCache), hl
+ 208  8165 C9           	ret
+ 209  8166
+ 210  8166              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 211  8166
+ 212  8166
+ 213  8166              ReadKeyLoop:
+ 214  8166 CD 55 81     	call	CalcFileCache
+ 215  8169 CD 33 85     	call	DisplayFileInfo
+ 216  816C
+ 217  816C CD 04 87     	call	ReadChar
+ 218  816F 32 78 92     	ld		(LastKey), a
+ 219  8172
+ 220  8172 FE 0A        	cp		KEY_DOWN
+ 221  8174 20 11        	jr		nz, CheckUp
+ 222  8176
+ 223  8176 3A 73 92     	ld		a, (FileCnt)
+ 224  8179 47           	ld		b, a
+ 225  817A 3A 75 92     	ld		a, (SelFile)
+ 226  817D 3C           	inc		a
+ 227  817E B8           	cp		b
+ 228  817F 30 E5        	jr		nc, ReadKeyLoop
+ 229  8181 32 75 92     	ld		(SelFile), a
+ 230  8184 C3 AE 83     	jp		MoveIt
+ 231  8187
+ 232  8187              CheckUp:
+ 233  8187 FE 0B        	cp		KEY_UP
+ 234  8189 20 0D        	jr		nz, CheckRight
+ 235  818B
+ 236  818B 3A 75 92     	ld		a, (SelFile)
+ 237  818E B7           	or		a
+ 238  818F 28 D5        	jr		z, ReadKeyLoop
+ 239  8191
+ 240  8191 3D           	dec		a
+ 241  8192 32 75 92     	ld		(SelFile), a
+ 242  8195 C3 AE 83     	jp		MoveIt
+ 243  8198
+ 244  8198              CheckRight:
+ 245  8198 FE 09        	cp		KEY_RIGHT
+ 246  819A 20 12        	jr		nz, CheckLeft
+ 247  819C
+ 248  819C 3A 73 92     	ld		a, (FileCnt)
+ 249  819F 47           	ld		b, a
+ 250  81A0 3A 75 92     	ld		a, (SelFile)
+ 251  81A3 C6 17        	add		LST_LINES_CNT
+ 252  81A5 B8           	cp		b
+ 253  81A6 30 BE        	jr		nc, ReadKeyLoop
+ 254  81A8
+ 255  81A8 32 75 92     	ld		(SelFile), a
+ 256  81AB C3 AE 83     	jp		MoveIt
+ 257  81AE
+ 258  81AE              CheckLeft:
+ 259  81AE FE 08        	cp		KEY_LEFT
+ 260  81B0 20 0D        	jr		nz, CheckEnter
+ 261  81B2
+ 262  81B2 3A 75 92     	ld		a, (SelFile)
+ 263  81B5 D6 17        	sub		LST_LINES_CNT
+ 264  81B7 38 AD        	jr		c, ReadKeyLoop
+ 265  81B9
+ 266  81B9 32 75 92     	ld		(SelFile), a
+ 267  81BC C3 AE 83     	jp		MoveIt
+ 268  81BF
+ 269  81BF              CheckEnter:
+ 270  81BF FE 0D        	cp		KEY_ENTER
+ 271  81C1 C2 CA 81     	jp		nz, CheckKeyInfo
+ 272  81C4 CD 94 84     	call	HandleFile
+ 273  81C7 C3 48 80     	jp		HCRunMain
+ 274  81CA
+ 275  81CA              CheckKeyInfo:
+ 276  81CA FE 34        	cp		'4'
+ 277  81CC 20 20        	jr		nz, CheckKeyCopy
+ 278  81CE DD 2A 7B 92  	ld		ix, (SelFileCache)
+ 279  81D2 21 BE 91     	ld		hl, MsgReadingExt
+ 280  81D5 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 281  81D8 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 282  81DA CD 68 87     	call	PrintStrClr
+ 283  81DD CD 40 8B     	call	ReadFileHeader
+ 284  81E0 21 CC 91     	ld		hl, MsgClear
+ 285  81E3 11 00 0E     	ld		de, LST_LINE_MSG+1 << 8
+ 286  81E6 3E 0F        	ld		a, SCR_DEF_CLR
+ 287  81E8 CD 68 87     	call	PrintStrClr
+ 288  81EB C3 66 81     	jp		ReadKeyLoop
+ 289  81EE
+ 290  81EE              CheckKeyCopy:
+ 291  81EE FE 35        	cp		'5'
+ 292  81F0 20 39        	jr		nz, CheckKeyFileInfo
+ 293  81F2
+ 294  81F2 3A C6 8B     	ld 		a, (RWTSDrive)
+ 295  81F5 3C           	inc		a
+ 296  81F6 EE 03        	xor		%11
+ 297  81F8 C6 40        	add		'A'-1
+ 298  81FA 32 22 92     	ld		(MsgCopyFileDrv), a
+ 299  81FD 21 17 92     	ld		hl, MsgCopyFile
+ 300  8200 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 301  8203 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 302  8205 CD 68 87     	call	PrintStrClr
+ 303  8208 2A 7B 92     	ld	hl, (SelFileCache)
+ 304  820B CD 7F 8C     	call	CopyFile
+ 305  820E B7           	or		a
+ 306  820F 28 17        	jr		z, CopyFileOK
+ 307  8211
+ 308  8211 6F           	ld		l, a
+ 309  8212 26 00        	ld		h, 0
+ 310  8214 11 07 91     	ld		de, MsgErrCode
+ 311  8217 CD D2 88     	call	Byte2Txt
+ 312  821A 21 FC 90     	ld		hl, MsgErr
+ 313  821D 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 314  8220 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 315  8222 CD 68 87     	call	PrintStrClr
+ 316  8225 CD 04 87     	call	ReadChar
+ 317  8228
+ 318  8228              CopyFileOK:
+ 319  8228 C3 12 80     	jp		HCRunInitDisk
+ 320  822B
+ 321  822B              CheckKeyFileInfo:
+ 322  822B FE 20        	cp		' '
+ 323  822D 20 06        	jr		nz, CheckKeyDriveA
+ 324  822F CD A8 86     	call	ReadAllHeaders
+ 325  8232 C3 66 81     	jp		ReadKeyLoop
+ 326  8235
+ 327  8235              CheckKeyDriveA:
+ 328  8235 FE 31        	cp		'1'
+ 329  8237 20 05        	jr		nz, CheckKeyDriveB
+ 330  8239 3E 00        	ld		a, DRIVE_A_CPM
+ 331  823B C3 0C 83     	jp		SelectDrive
+ 332  823E
+ 333  823E              CheckKeyDriveB:
+ 334  823E FE 32        	cp		'2'
+ 335  8240 20 05        	jr		nz, CheckKeyView
+ 336  8242 3E 01        	ld		a, DRIVE_B_CPM
+ 337  8244 C3 0C 83     	jp		SelectDrive
+ 338  8247
+ 339  8247              CheckKeyView:
+ 340  8247 FE 33        	cp		'3'
+ 341  8249 20 06        	jr		nz, CheckKeyRename
+ 342  824B CD 16 85     	call	ViewFile
+ 343  824E C3 48 80     	jp		HCRunMain
+ 344  8251
+ 345  8251              CheckKeyRename:
+ 346  8251 FE 36        	cp		'6'
+ 347  8253 20 4B        	jr		nz, CheckKeyDel
+ 348  8255
+ 349  8255 21 07 92     	ld		hl, MsgNewFileName
+ 350  8258 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 351  825B 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 352  825D CD 68 87     	call	PrintStrClr
+ 353  8260
+ 354  8260 21 CC 91     	ld		hl, MsgClear
+ 355  8263 11 C9 B2     	ld		de, DataBuf
+ 356  8266 01 0B 00     	ld		bc, NAMELEN
+ 357  8269 ED B0        	ldir
+ 358  826B 3E A0        	ld		a, $80 | ' '
+ 359  826D 12           	ld		(de), a
+ 360  826E 11 00 0F     	ld		de, LST_LINE_MSG + 2 << 8
+ 361  8271 21 C9 B2     	ld		hl, DataBuf
+ 362  8274 CD 40 87     	call	PrintStr
+ 363  8277
+ 364  8277 11 00 0F     	ld		de, LST_LINE_MSG + 2 << 8
+ 365  827A 01 0B 00     	ld		bc, NAMELEN
+ 366  827D CD 81 88     	call	ReadString
+ 367  8280
+ 368  8280 11 C9 B2     	ld		de, DataBuf
+ 369  8283 1A           	ld		a, (de)
+ 370  8284 FE 20        	cp		' '					;If starting with space, input was canceled.
+ 371  8286 CA 92 82     	jp		z, RenameCanceled
+ 372  8289 2A 7B 92     	ld		hl, (SelFileCache)
+ 373  828C CD 5C 8C     	call	RenameFile
+ 374  828F C3 12 80     	jp		HCRunInitDisk
+ 375  8292
+ 376  8292              RenameCanceled:
+ 377  8292 21 CC 91     	ld		hl, MsgClear
+ 378  8295 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 379  8298 3E 0F        	ld		a, SCR_DEF_CLR
+ 380  829A CD 68 87     	call	PrintStrClr
+ 381  829D C3 66 81     	jp		ReadKeyLoop
+ 382  82A0
+ 383  82A0              CheckKeyDel:
+ 384  82A0 FE 38        	cp		'8'
+ 385  82A2 20 2D        	jr		nz, CheckKeyAttrib
+ 386  82A4
+ 387  82A4 21 DC 91     	ld		hl, MsgDelete
+ 388  82A7 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 389  82AA 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 390  82AC CD 68 87     	call	PrintStrClr
+ 391  82AF CD 04 87     	call	ReadChar
+ 392  82B2 FE 79        	cp		'y'
+ 393  82B4 28 0E        	jr		z, DoFileDelete
+ 394  82B6 21 CC 91     	ld		hl, MsgClear
+ 395  82B9 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 396  82BC 3E 0F        	ld		a, SCR_DEF_CLR
+ 397  82BE CD 68 87     	call	PrintStrClr
+ 398  82C1 C3 66 81     	jp		ReadKeyLoop
+ 399  82C4              DoFileDelete:
+ 400  82C4 2A 7B 92     	ld		hl, (SelFileCache)
+ 401  82C7 3A C6 8B     	ld 		a, (RWTSDrive)
+ 402  82CA 3C           	inc		a					;Convert to BASIC drive number: 1,2
+ 403  82CB CD 26 8C     	call	DeleteFile
+ 404  82CE C3 12 80     	jp		HCRunInitDisk
+ 405  82D1
+ 406  82D1              CheckKeyAttrib:
+ 407  82D1 FE 37        	cp		'7'
+ 408  82D3 20 3D        	jr		nz, CheckKeyExtra
+ 409  82D5
+ 410  82D5 21 EB 91     	ld		hl, MsgSetRO
+ 411  82D8 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 412  82DB 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 413  82DD CD 68 87     	call	PrintStrClr
+ 414  82E0 CD 04 87     	call	ReadChar
+ 415  82E3 1E 00        	ld		e, 0
+ 416  82E5 FE 79        	cp		'y'
+ 417  82E7 20 02        	jr		nz, CheckSYS
+ 418  82E9 1E 01        	ld		e, 1
+ 419  82EB
+ 420  82EB              CheckSYS:
+ 421  82EB D5           	push	de
+ 422  82EC 21 F9 91     	ld		hl, MsgSetSYS
+ 423  82EF 11 00 0F     	ld		de, LST_LINE_MSG + 2 << 8
+ 424  82F2 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 425  82F4 CD 68 87     	call	PrintStrClr
+ 426  82F7 CD 04 87     	call	ReadChar
+ 427  82FA FE 79        	cp		'y'
+ 428  82FC D1           	pop		de
+ 429  82FD 20 04        	jr		nz, AttrChange
+ 430  82FF 3E 02        	ld		a, %10
+ 431  8301 B3           	or		e
+ 432  8302 5F           	ld		e, a
+ 433  8303
+ 434  8303              AttrChange:
+ 435  8303 2A 7B 92     	ld		hl, (SelFileCache)
+ 436  8306 CD 32 8C     	call	ChangeFileAttrib
+ 437  8309 C3 12 80     	jp		HCRunInitDisk
+ 438  830C
+ 439  830C              SelectDrive:
+ 440  830C 32 C6 8B     	ld 		(RWTSDrive), a
+ 441  830F C3 12 80     	jp		HCRunInitDisk
+ 442  8312
+ 443  8312              CheckKeyExtra:
+ 444  8312 FE 39        	cp		'9'
+ 445  8314 C2 A6 83     	jp		nz, CheckKeyExit
+ 446  8317 21 24 92     	ld		hl, MsgMenu0
+ 447  831A 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 448  831D 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 449  831F CD 68 87     	call	PrintStrClr
+ 450  8322 3A C6 8B     	ld		a, (RWTSDrive)
+ 451  8325 C6 41        	add		'A'
+ 452  8327 32 3F 92     	ld		(MsgMenu1Drv), a
+ 453  832A 32 62 92     	ld		(MsgFormatDrv), a
+ 454  832D
+ 455  832D              CheckKeyExtraMenu:
+ 456  832D 21 31 92     	ld		hl, MsgMenu1
+ 457  8330 11 00 0F     	ld		de, LST_LINE_MSG + 2 << 8
+ 458  8333 CD 40 87     	call	PrintStr
+ 459  8336 21 41 92     	ld		hl, MsgMenu2
+ 460  8339 11 00 10     	ld		de, LST_LINE_MSG + 3 << 8
+ 461  833C CD 40 87     	call	PrintStr
+ 462  833F 21 4C 92     	ld		hl, MsgMenu3
+ 463  8342 11 00 11     	ld		de, LST_LINE_MSG + 4 << 8
+ 464  8345 CD 40 87     	call	PrintStr
+ 465  8348 CD 04 87     	call	ReadChar
+ 466  834B F5           	push	af
+ 467  834C
+ 468  834C 21 CC 91     		ld		hl, MsgClear
+ 469  834F 11 00 0F     		ld		de, LST_LINE_MSG + 2 << 8
+ 470  8352 CD 40 87     		call	PrintStr
+ 471  8355 21 CC 91     		ld		hl, MsgClear
+ 472  8358 11 00 10     		ld		de, LST_LINE_MSG + 3 << 8
+ 473  835B CD 40 87     		call	PrintStr
+ 474  835E 21 CC 91     		ld		hl, MsgClear
+ 475  8361 11 00 11     		ld		de, LST_LINE_MSG + 4 << 8
+ 476  8364 CD 40 87     		call	PrintStr
+ 477  8367
+ 478  8367 F1           	pop		af
+ 479  8368 FE 33        	cp		'3'
+ 480  836A 28 37        	jr		z, ExtraMenuExit
+ 481  836C
+ 482  836C FE 31        	cp		'1'
+ 483  836E 20 2A        	jr		nz, CheckExtra2
+ 484  8370
+ 485  8370 21 57 92     	ld		hl, MsgFormat
+ 486  8373 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 487  8376 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 488  8378 CD 68 87     	call	PrintStrClr
+ 489  837B
+ 490  837B CD 67 89     	call	FormatDisk
+ 491  837E B7           	or		a
+ 492  837F 28 17        	jr		z, FormatDiskOK
+ 493  8381
+ 494  8381              	;Display error for format
+ 495  8381 6F           	ld		l, a
+ 496  8382 26 00        	ld		h, 0
+ 497  8384 11 07 91     	ld		de, MsgErrCode
+ 498  8387 CD D2 88     	call	Byte2Txt
+ 499  838A 21 FC 90     	ld		hl, MsgErr
+ 500  838D 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 501  8390 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 502  8392 CD 68 87     	call	PrintStrClr
+ 503  8395 CD 04 87     	call	ReadChar
+ 504  8398
+ 505  8398              FormatDiskOK:
+ 506  8398 18 09        	jr		ExtraMenuExit
+ 507  839A
+ 508  839A              CheckExtra2:
+ 509  839A FE 32        	cp		'2'
+ 510  839C 20 8F        	jr		nz, CheckKeyExtraMenu
+ 511  839E
+ 512  839E CD 43 8A     	call	CopyDisk
+ 513  83A1 18 00        	jr		ExtraMenuExit
+ 514  83A3
+ 515  83A3              ExtraMenuExit:
+ 516  83A3 C3 48 80     	jp		HCRunMain
+ 517  83A6
+ 518  83A6              CheckKeyExit:
+ 519  83A6 FE 30        	cp		'0'
+ 520  83A8 C2 66 81     	jp		nz, ReadKeyLoop
+ 521  83AB C3 54 80     	jp		HCRunEnd
+ 522  83AE
+ 523  83AE              MoveIt:
+ 524  83AE CD 0B 88     	call 	MoveCursor
+ 525  83B1 C3 66 81     	jp		ReadKeyLoop
+ 526  83B4
+ 527  83B4              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 528  83B4
+ 529  83B4
+ 530  83B4              DisplayFilename:
+ 531  83B4 06 0B        	LD		B, NAMELEN
+ 532  83B6              DispLoop:
+ 533  83B6 1A           	LD		A, (DE)
+ 534  83B7
+ 535  83B7              	;clear bit 7
+ 536  83B7 CB BF        	RES 	7, A
+ 537  83B9 32 81 5C     	LD		(CODE), A
+ 538  83BC
+ 539  83BC 13           	INC		DE
+ 540  83BD D5           	PUSH	DE
+ 541  83BE C5           	PUSH	BC
+ 542  83BF CD 43 88     		CALL	PrintChar
+ 543  83C2 C1           	POP		BC
+ 544  83C3 D1           	POP 	DE
+ 545  83C4
+ 546  83C4 21 B0 5C     	LD		HL, COL
+ 547  83C7 34           	INC		(HL)
+ 548  83C8 10 EC        	DJNZ	DispLoop
+ 549  83CA              	;now a name is displayed
+ 550  83CA
+ 551  83CA              	;check bounds
+ 552  83CA 3A B1 5C     	LD		A, (LINE)
+ 553  83CD 3C           	INC		A
+ 554  83CE FE 17        	CP		LST_LINES_CNT + LST_FIRST_LINE
+ 555  83D0 38 0A        	JR		C, LineOK
+ 556  83D2
+ 557  83D2              	;set names column to the next one
+ 558  83D2 3A 74 92     	LD		A, (NameCol)
+ 559  83D5 C6 0C        	ADD		NAMELEN + 1
+ 560  83D7 32 74 92     	LD		(NameCol), A
+ 561  83DA
+ 562  83DA 3E 00        	LD		A, LST_FIRST_LINE
+ 563  83DC              LineOK:
+ 564  83DC 32 B1 5C     	LD		(LINE), A
+ 565  83DF
+ 566  83DF 3A 74 92     	LD		A, (NameCol)
+ 567  83E2 32 B0 5C     	LD		(COL), A
+ 568  83E5
+ 569  83E5 C9           	RET
+ 570  83E6
+ 571  83E6
+ 572  83E6              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 573  83E6
+ 574  83E6              DisplayFilenames:
+ 575  83E6 11 7D 92     	ld		de, FileCache
+ 576  83E9 3A 73 92     	ld		a, (FileCnt)
+ 577  83EC 47           	ld		b,	a
+ 578  83ED
+ 579  83ED              DisplayFilenamesLoop:
+ 580  83ED C5           	push	bc
+ 581  83EE D5           		push	de
+ 582  83EF CD B4 83     			call	DisplayFilename
+ 583  83F2 D1           		pop		de
+ 584  83F3 EB           		ex		de, hl
+ 585  83F4 01 19 00     		ld		bc, CACHE_SZ
+ 586  83F7 09           		add		hl, bc
+ 587  83F8 EB           		ex		de, hl
+ 588  83F9 C1           	pop		bc
+ 589  83FA 10 F1        	djnz	DisplayFilenamesLoop
+ 590  83FC
+ 591  83FC C9           	ret
+ 592  83FD
+ 593  83FD
+ 594  83FD              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 595  83FD              ;Selects only valid filenames (not deleted and only from first extension)
+ 596  83FD              GetFileNames:
+ 597  83FD DD 21 FD 9E  	ld ix, TrackBuf
+ 598  8401 11 7D 92     	ld de, FileCache
+ 599  8404 06 80        	ld b, MAX_EXT_CNT
+ 600  8406
+ 601  8406              StoreFilenamesLoop:
+ 602  8406 AF           	xor a
+ 603  8407 DD BE 00     	cp (ix + EXT_DEL_FLAG)
+ 604  840A C2 86 84     	jp nz, NextExt			;check for deleted
+ 605  840D
+ 606  840D              	;count AU
+ 607  840D D9           	exx
+ 608  840E E5           	push hl
+ 609  840F CD 96 89     		call CheckExtAlloc
+ 610  8412 EB           		ex de, hl			;save first AU no.
+ 611  8413
+ 612  8413              		;store disk alocated AU count
+ 613  8413 2A 79 92     		ld hl, (AUCnt)
+ 614  8416 48           		ld c, b
+ 615  8417 06 00        		ld b, 0
+ 616  8419 09           		add hl, bc
+ 617  841A 22 79 92     		ld (AUCnt), hl
+ 618  841D E1           	pop hl
+ 619  841E D9           	exx
+ 620  841F
+ 621  841F AF           	xor	a
+ 622  8420 DD BE 0C     	cp (ix + EXT_IDX)		;check if first extension
+ 623  8423 20 3A        	jr nz, FindExt
+ 624  8425
+ 625  8425 DD E5        	push ix
+ 626  8427 E1           	pop hl
+ 627  8428 23           	inc hl					;skip del flag
+ 628  8429
+ 629  8429 C5           	push bc
+ 630  842A D5           		push de
+ 631  842B E5           			push hl
+ 632  842C EB           				ex de, hl
+ 633  842D CD B4 83     				call DisplayFilename
+ 634  8430 E1           			pop hl
+ 635  8431 D1           		pop de
+ 636  8432 01 0B 00     		ld bc, NAMELEN
+ 637  8435 ED B0        		ldir				;save file name
+ 638  8437
+ 639  8437 D9           		exx
+ 640  8438 D5           		push 	de			;de = first AU
+ 641  8439 D9           		exx
+ 642  843A E1           		pop		hl
+ 643  843B EB           		ex		de, hl
+ 644  843C 73 23 72 2B  		ld		(hl), de	;save first AU
+ 645  8440
+ 646  8440 23           		inc		hl
+ 647  8441 23           		inc		hl
+ 648  8442
+ 649  8442 D9           		exx					;save AU cnt for file
+ 650  8443 C5           		push	bc
+ 651  8444 D9           		exx
+ 652  8445 C1           		pop		bc
+ 653  8446 71 23 70 2B  		ld		(hl), bc
+ 654  844A
+ 655  844A 23           		inc		hl
+ 656  844B 23           		inc		hl
+ 657  844C
+ 658  844C              		;xor		a			;make flag 0 to signal that header is not read yet
+ 659  844C              		;ld		(hl), a
+ 660  844C
+ 661  844C 01 0A 00     		ld		bc, HDR_SZ + 1
+ 662  844F 09           		add		hl, bc
+ 663  8450
+ 664  8450 EB           		ex		de, hl
+ 665  8451 C1           	pop bc
+ 666  8452
+ 667  8452
+ 668  8452 3A 73 92     	ld 		a, (FileCnt)			;inc file counter
+ 669  8455 3C           	inc		a
+ 670  8456 32 73 92     	ld 		(FileCnt), a
+ 671  8459 FE 5C        	cp		LST_MAX_FILES
+ 672  845B 38 29        	jr		c, NextExt
+ 673  845D 18 34        	jr		GetFileNamesEnd
+ 674  845F
+ 675  845F
+ 676  845F              FindExt:					;BC' = AU cnt for this ext
+ 677  845F C5           	push	bc
+ 678  8460 D5           		push 	de
+ 679  8461 DD E5        			push	ix
+ 680  8463 D1           			pop		de
+ 681  8464 13           			inc		de				;DE = name to find
+ 682  8465
+ 683  8465 21 7D 92     			ld		hl, FileCache
+ 684  8468 3A 73 92     			ld		a, (FileCnt)
+ 685  846B 4F           			ld		c, a
+ 686  846C CD 2F 8B     			call	FindCache
+ 687  846F 20 13        			jr		nz, FindExtEnd
+ 688  8471
+ 689  8471 01 0D 00     			ld		bc, CACHE_AU_CNT
+ 690  8474 09           			add		hl, bc
+ 691  8475 D9           			exx
+ 692  8476 C5           			push	bc
+ 693  8477 D9           			exx
+ 694  8478 C1           			pop		bc
+ 695  8479
+ 696  8479 5E 23 56 2B  			ld		de, (hl)		;DE = Current AU CNT for file
+ 697  847D EB           			ex		de, hl
+ 698  847E 09           			add		hl, bc
+ 699  847F EB           			ex		de, hl
+ 700  8480 73 23 72 2B  			ld		(hl), de
+ 701  8484              FindExtEnd:
+ 702  8484 D1           		pop		de
+ 703  8485 C1           	pop		bc
+ 704  8486
+ 705  8486              NextExt:
+ 706  8486 C5           	push bc
+ 707  8487 01 20 00     		ld bc, EXT_SZ
+ 708  848A DD 09        		add ix, bc
+ 709  848C C1           	pop	bc
+ 710  848D
+ 711  848D 05           	dec	b
+ 712  848E 78           	ld	a, b
+ 713  848F B7           	or	a
+ 714  8490 C2 06 84     	jp	nz, StoreFilenamesLoop
+ 715  8493              GetFileNamesEnd:
+ 716  8493 C9           	ret
+ 717  8494
+ 718  8494              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 719  8494
+ 720  8494              ;Take care of file depeding on file type: run programs, display SCREEN$, load code
+ 721  8494              ;IN: HL = file name
+ 722  8494              HandleFile:
+ 723  8494              	;Make HL point to the selected file
+ 724  8494 DD 2A 7B 92  	ld		ix, (SelFileCache)
+ 725  8498 DD E5        	push	ix
+ 726  849A DD 7E 0F     		ld		a, (ix + CACHE_FLAG)
+ 727  849D B7           		or		a
+ 728  849E CC 40 8B     		call	z, ReadFileHeader
+ 729  84A1
+ 730  84A1 DD 7E 10     		ld		a, (ix + CACHE_HDR + HDR_TYPE)
+ 731  84A4 FE 00        		cp		PROG_TYPE
+ 732  84A6 28 59        		jr		z, HandleFileProg
+ 733  84A8
+ 734  84A8 FE 03        		cp		BYTE_TYPE
+ 735  84AA 20 65        		jr		nz, HandleFileText
+ 736  84AC
+ 737  84AC DD 6E 11 DD  		ld		hl, (ix + CACHE_HDR + HDR_LEN)		;get length
+ 737  84B0 66 12
+ 738  84B2 11 00 E5     		ld		de, -SCR_LEN			;check if the length is for a screen$ file
+ 739  84B5 19           		add		hl, de
+ 740  84B6 7C           		ld		a, h
+ 741  84B7 B5           		or		l
+ 742  84B8 28 29        		jr		z, HandleFileSCR
+ 743  84BA
+ 744  84BA
+ 745  84BA              HandleFileCODE:
+ 746  84BA 21 2A 91     		ld		hl, MsgLoadingCODE
+ 747  84BD 11 00 0E     		ld		de, LST_LINE_MSG+1 << 8
+ 748  84C0 3E 8F        		ld		a, SCR_DEF_CLR | CLR_FLASH
+ 749  84C2 CD 68 87     		call	PrintStrClr
+ 750  84C5
+ 751  84C5              		;Copy file load function to printer buffer to not be overwritten by CODE block.
+ 752  84C5 21 AA 8A     		ld		hl, FileLoad
+ 753  84C8 11 00 5B     		ld		de, PRN_BUF
+ 754  84CB 01 41 00     		ld		bc, FileLoadEnd - FileLoad
+ 755  84CE ED B0        		ldir
+ 756  84D0 3E C9        		ld		a, $C9
+ 757  84D2 12           		ld		(de), a				;put a RET here, since FileFree won't be called.
+ 758  84D3
+ 759  84D3 E1           	pop		hl
+ 760  84D4 ED 5B CC B2  	ld		de, (DataBuf + HDR_ADDR)	;get CODE start address to load to and then execute
+ 761  84D8 C1           	pop		bc						;balance stack to exit to BASIC after CODE returns - 1 call for this function
+ 762  84D9 C1           	pop		bc						;2nd, 3rd call for error handler
+ 763  84DA C1           	pop		bc
+ 764  84DB ED 43 3D 5C  	ld		(ERRSP), bc
+ 765  84DF D5           	push	de						;push CODE address to return to = start of CODE block
+ 766  84E0 C3 00 5B     	jp		PRN_BUF
+ 767  84E3
+ 768  84E3
+ 769  84E3
+ 770  84E3
+ 771  84E3              HandleFileSCR:
+ 772  84E3 21 1B 91     		ld		hl, MsgLoadingSCR
+ 773  84E6 11 00 0E     		ld		de, LST_LINE_MSG+1 << 8
+ 774  84E9 3E 8F        		ld		a, SCR_DEF_CLR | CLR_FLASH
+ 775  84EB CD 68 87     		call	PrintStrClr
+ 776  84EE
+ 777  84EE E1           	pop		hl
+ 778  84EF
+ 779  84EF              	ifdef _ROM_FNT_
+ 780  84EF              	;Load to alternate SCREEN$ memory
+ 781  84EF 11 00 C0     	ld		de, HC_VID_BANK1
+ 782  84F2 CD AA 8A     	call	FileLoad
+ 783  84F5              	;Set display to alternate SCREEN$ memory
+ 784  84F5 3E 08        	ld		a, HC_CFG_VID_C000
+ 785  84F7 D3 7E        	out 	(HC_CFG_PORT), a
+ 786  84F9 CD 04 87     	call	ReadChar
+ 787  84FC              	;Set back to regular SCREEN$ memory
+ 788  84FC 3E 00        	ld		a, HC_CFG_VID_4000
+ 789  84FE D3 7E        	out 	(HC_CFG_PORT), a
+ 790  8500              	else
+ 791  8500 ~            	ld		de, 16384
+ 792  8500 ~            	call	FileLoad
+ 793  8500 ~            	call	ReadChar
+ 794  8500              	endif
+ 795  8500
+ 796  8500 C9           	ret
+ 797  8501
+ 798  8501              HandleFileProg:
+ 799  8501 21 0C 91     		ld		hl, MsgLoadingPrg
+ 800  8504 11 00 0E     		ld		de, LST_LINE_MSG+1 << 8
+ 801  8507 3E 8F        		ld		a, SCR_DEF_CLR | CLR_FLASH
+ 802  8509 CD 68 87     		call	PrintStrClr
+ 803  850C E1           	pop		hl
+ 804  850D CD 78 8B     	call	LoadProgram
+ 805  8510 C9           	ret
+ 806  8511
+ 807  8511
+ 808  8511              HandleFileText:
+ 809  8511 E1           	pop		hl
+ 810  8512 CD 16 85     	call	ViewFile
+ 811  8515 C9           	ret
+ 812  8516
+ 813  8516
+ 814  8516              ViewFile:
+ 815  8516 CD 20 87     	call	ClrScr
+ 816  8519 2A 7B 92     	ld		hl, (SelFileCache)
+ 817  851C 11 C9 BA     	ld		de, DataBuf + 2048
+ 818  851F
+ 819  851F D5           	push	de
+ 820  8520 D5           		push	de
+ 821  8521 CD AA 8A     			call	FileLoad		;DE = last addr.
+ 822  8524 EB           			ex		de, hl
+ 823  8525 D1           		pop		de
+ 824  8526 B7           		or		a
+ 825  8527 ED 52        		sbc		hl, de
+ 826  8529 44           		ld		b, h
+ 827  852A 4D           		ld		c, l
+ 828  852B E1           	pop		hl
+ 829  852C CD D9 8C     	call	InitViewer
+ 830  852F CD 33 8D     	call	PrintLoop
+ 831  8532 C9           	ret
+ 832  8533
+ 833  8533              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 834  8533
+ 835  8533
+ 836  8533              DisplayFileInfo:
+ 837  8533 2A 7B 92     	ld		hl, (SelFileCache)
+ 838  8536 E5           	push	hl
+ 839  8537              		;disk size
+ 840  8537 01 0D 00     		ld		bc, CACHE_AU_CNT
+ 841  853A 09           		add		hl, bc
+ 842  853B 5E 23 56 2B  		ld		de, (hl)
+ 843  853F EB           		ex		de, hl
+ 844  8540 11 43 91     		ld		de, MsgFileSzDskN
+ 845  8543
+ 846  8543 06 0B        		ld		b, 11
+ 847  8545              MultKb:
+ 848  8545 29           		add		hl, hl
+ 849  8546 10 FD        		djnz	MultKb
+ 850  8548
+ 851  8548
+ 852  8548 CD C7 88     		call	Word2Txt
+ 853  854B 21 3A 91     		ld		hl, MsgFileSzDsk
+ 854  854E 11 00 08     		ld		de, LST_FILE_INFO + 1 << 8
+ 855  8551 CD 40 87     		call	PrintStr
+ 856  8554 E1           	pop		hl
+ 857  8555 E5           	push	hl
+ 858  8556              		;attributes
+ 859  8556 01 08 00     		ld		bc, CACHE_NAME + RO_POS
+ 860  8559 09           		add		hl, bc
+ 861  855A EB           		ex		de, hl
+ 862  855B 21 53 91     		ld		hl, MsgFileAttrN
+ 863  855E 1A           		ld		a, (de)
+ 864  855F E6 80        		and		%10000000
+ 865  8561 28 14        		jr		z, NotRO
+ 866  8563
+ 867  8563 01 52 2F     		ld		bc, '/R'
+ 868  8566 71 23 70 2B  		ld		(hl), bc
+ 869  856A 23           		inc		hl
+ 870  856B 23           		inc		hl
+ 871  856C 01 4F 2C     		ld		bc, ',O'
+ 872  856F 71 23 70 2B  		ld		(hl), bc
+ 873  8573 23           		inc		hl
+ 874  8574 23           		inc		hl
+ 875  8575 18 12        		jr		CheckSys
+ 876  8577              NotRO:
+ 877  8577 01 2D 2D     		ld		bc, '--'
+ 878  857A 71 23 70 2B  		ld		(hl), bc
+ 879  857E 23           		inc		hl
+ 880  857F 23           		inc		hl
+ 881  8580 01 2D 2C     		ld		bc, ',-'
+ 882  8583 71 23 70 2B  		ld		(hl), bc
+ 883  8587 23           		inc		hl
+ 884  8588 23           		inc		hl
+ 885  8589
+ 886  8589              CheckSys:
+ 887  8589 13           		inc		de
+ 888  858A 1A           		ld		a, (de)
+ 889  858B E6 80        		and		%10000000
+ 890  858D 28 0E        		jr		z, NotSYS
+ 891  858F
+ 892  858F 01 48 49     		ld		bc, 'IH'
+ 893  8592 71 23 70 2B  		ld		(hl), bc
+ 894  8596 23           		inc		hl
+ 895  8597 23           		inc		hl
+ 896  8598 3E C4        		ld		a, 'D' + $80
+ 897  859A 77           		ld		(hl), a
+ 898  859B 18 0C        		jr		AttrEnd
+ 899  859D              NotSYS:
+ 900  859D 01 2D 2D     		ld		bc, '--'
+ 901  85A0 71 23 70 2B  		ld		(hl), bc
+ 902  85A4 23           		inc		hl
+ 903  85A5 23           		inc		hl
+ 904  85A6 3E AD        		ld		a, '-' + $80
+ 905  85A8 77           		ld		(hl), a
+ 906  85A9              AttrEnd:
+ 907  85A9 11 00 09     		ld		de, LST_FILE_INFO + 2 << 8
+ 908  85AC 21 4A 91     		ld		hl, MsgFileAttr
+ 909  85AF CD 40 87     		call	PrintStr
+ 910  85B2 DD E1        	pop		ix
+ 911  85B4 DD E5        	push	ix
+ 912  85B6 DD 7E 0F     		ld		a, (ix + CACHE_FLAG)
+ 913  85B9 B7           		or		a
+ 914  85BA CA 59 86     		jp		z, HeadNotRead
+ 915  85BD
+ 916  85BD DD 7E 0B     		ld		a, (ix + CACHE_FIRST_AU)
+ 917  85C0 DD B6 0C     		or		(ix + CACHE_FIRST_AU + 1)
+ 918  85C3 CA 59 86     		jp		z, HeadNotRead
+ 919  85C6
+ 920  85C6 DD 7E 10     		ld		a, (ix + CACHE_HDR)
+ 921  85C9 FE 00        		cp		PROG_TYPE
+ 922  85CB 20 0B        		jr		nz, CheckNoArr
+ 923  85CD
+ 924  85CD 21 6D 91     		ld		hl, MsgFileTypePrg
+ 925  85D0 11 63 91     		ld		de, MsgFileTypeN
+ 926  85D3 CD A2 86     		call	MoveMsg
+ 927  85D6 18 51        		jr		PrepFileLen
+ 928  85D8
+ 929  85D8              CheckNoArr:
+ 930  85D8 FE 01        		cp		NUMB_TYPE
+ 931  85DA 20 0B        		jr		nz, CheckChrArr
+ 932  85DC
+ 933  85DC 21 89 91     		ld		hl, MsgFileTypeNoA
+ 934  85DF 11 63 91     		ld		de, MsgFileTypeN
+ 935  85E2 CD A2 86     		call	MoveMsg
+ 936  85E5 18 42        		jr		PrepFileLen
+ 937  85E7
+ 938  85E7              CheckChrArr:
+ 939  85E7 FE 02        		cp		CHAR_TYPE
+ 940  85E9 20 0B        		jr		nz, CheckByte
+ 941  85EB
+ 942  85EB 21 82 91     		ld		hl, MsgFileTypeChrA
+ 943  85EE 11 63 91     		ld		de, MsgFileTypeN
+ 944  85F1 CD A2 86     		call	MoveMsg
+ 945  85F4 18 33        		jr		PrepFileLen
+ 946  85F6
+ 947  85F6              CheckByte:
+ 948  85F6 FE 03        		cp		BYTE_TYPE
+ 949  85F8 20 24        		jr		nz, CheckText
+ 950  85FA
+ 951  85FA DD 6E 11 DD  		ld		hl, (ix + CACHE_HDR + HDR_LEN)
+ 951  85FE 66 12
+ 952  8600 01 00 E5     		ld		bc, -SCR_LEN
+ 953  8603 09           		add		hl, bc
+ 954  8604 7C           		ld		a, h
+ 955  8605 B5           		or		l
+ 956  8606 20 0B        		jr		nz, NotScr
+ 957  8608
+ 958  8608 21 7B 91     		ld		hl, MsgFileTypeSCR
+ 959  860B 11 63 91     		ld		de, MsgFileTypeN
+ 960  860E CD A2 86     		call	MoveMsg
+ 961  8611 18 16        		jr		PrepFileLen
+ 962  8613              NotScr:
+ 963  8613 21 74 91     		ld		hl, MsgFileTypeByt
+ 964  8616 11 63 91     		ld		de, MsgFileTypeN
+ 965  8619 CD A2 86     		call	MoveMsg
+ 966  861C 18 0B        		jr		PrepFileLen
+ 967  861E
+ 968  861E              CheckText:
+ 969  861E 21 90 91     		ld		hl, MsgFileTypeText
+ 970  8621 11 63 91     		ld		de, MsgFileTypeN
+ 971  8624 CD A2 86     		call	MoveMsg
+ 972  8627 18 39        		jr		NoHeader
+ 973  8629
+ 974  8629              PrepFileLen:
+ 975  8629              		;File len
+ 976  8629 DD 6E 11     		ld		l, (ix + CACHE_HDR + HDR_LEN)
+ 977  862C DD 66 12     		ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
+ 978  862F 11 A7 91     		ld		de, MsgFileLenN
+ 979  8632 CD C7 88     		call	Word2Txt
+ 980  8635 26 C2        		ld		h, 'B' | $80
+ 981  8637 2E 20        		ld		l, ' '
+ 982  8639 22 AC 91     		ld		(MsgFileLenN + 5), hl
+ 983  863C
+ 984  863C DD 7E 10     		ld		a, (ix + CACHE_HDR + HDR_TYPE)
+ 985  863F FE 00        		cp		PROG_TYPE
+ 986  8641 28 06        		jr		z, PrintProgStart
+ 987  8643
+ 988  8643 FE 03        		cp		BYTE_TYPE
+ 989  8645 28 0A        		jr		z, PrintByteStart
+ 990  8647 18 22        		jr		PrintStartNotRead
+ 991  8649
+ 992  8649              PrintProgStart:
+ 993  8649 DD 6E 17     		ld		l, (ix + CACHE_HDR + HDR_LINE)
+ 994  864C DD 66 18     		ld		h, (ix + CACHE_HDR + HDR_LINE + 1)
+ 995  864F 18 25        		jr		PrintStart
+ 996  8651
+ 997  8651              PrintByteStart:
+ 998  8651 DD 6E 13     		ld		l, (ix + CACHE_HDR + HDR_ADDR)
+ 999  8654 DD 66 14     		ld		h, (ix + CACHE_HDR + HDR_ADDR + 1)
+1000  8657 18 1D        		jr		PrintStart
+1001  8659
+1002  8659
+1003  8659              HeadNotRead:
+1004  8659 21 97 91     		ld		hl, MsgFileTypeUnkn
+1005  865C 11 63 91     		ld		de, MsgFileTypeN
+1006  865F CD A2 86     		call	MoveMsg
+1007  8662
+1008  8662              NoHeader:
+1009  8662 21 97 91     		ld		hl, MsgFileTypeUnkn
+1010  8665 11 A7 91     		ld		de, MsgFileLenN
+1011  8668 CD A2 86     		call	MoveMsg
+1012  866B
+1013  866B              PrintStartNotRead:
+1014  866B 21 97 91     		ld		hl, MsgFileTypeUnkn
+1015  866E 11 B7 91     		ld		de, MsgFileStartN
+1016  8671 CD A2 86     		call	MoveMsg
+1017  8674 18 0E        		jr		PrintStartStr
+1018  8676
+1019  8676              PrintStart:
+1020  8676 1E 20        	ld		e, ' '
+1021  8678 16 A0        	ld		d, ' ' | $80
+1022  867A ED 53 BC 91  	ld		(MsgFileStartN + 5), de
+1023  867E 11 B7 91     	ld		de, MsgFileStartN
+1024  8681 CD C7 88     	call	Word2Txt
+1025  8684              PrintStartStr:
+1026  8684 11 00 0B     	ld		de, LST_FILE_INFO + 4 << 8
+1027  8687 21 AE 91     	ld		hl, MsgFileStart
+1028  868A CD 40 87     	call	PrintStr
+1029  868D
+1030  868D DD E1        	pop		ix
+1031  868F 11 00 0A     	ld		de, LST_FILE_INFO + 3 << 8
+1032  8692 21 5A 91     	ld		hl, MsgFileType
+1033  8695 CD 40 87     	call	PrintStr
+1034  8698
+1035  8698 11 00 0C     	ld		de, LST_FILE_INFO + 5 << 8
+1036  869B 21 9E 91     	ld		hl, MsgFileLen
+1037  869E CD 40 87     	call	PrintStr
+1038  86A1
+1039  86A1 C9           	ret
+1040  86A2
+1041  86A2              MoveMsg:
+1042  86A2 01 07 00     	ld		bc, 7
+1043  86A5 ED B0        	ldir
+1044  86A7 C9           	ret
+1045  86A8
+1046  86A8              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+1047  86A8
+1048  86A8              ReadAllHeaders:
+1049  86A8 21 BE 91     	ld		hl, MsgReadingExt
+1050  86AB 11 00 0E     	ld		de, LST_LINE_MSG+1 << 8
+1051  86AE 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+1052  86B0 CD 68 87     	call	PrintStrClr
+1053  86B3
+1054  86B3 CD 55 81     	call	CalcFileCache
+1055  86B6
+1056  86B6 3A 75 92     	ld		a, (SelFile)
+1057  86B9 47           	ld		b, a
+1058  86BA 3A 73 92     	ld		a, (FileCnt)
+1059  86BD 90           	sub		b
+1060  86BE B7           	or		a
+1061  86BF C8           	ret		z
+1062  86C0
+1063  86C0 47           	ld		b, a
+1064  86C1
+1065  86C1 DD 2A 7B 92  	ld		ix, (SelFileCache)
+1066  86C5              NextFile:
+1067  86C5 C5           	push	bc
+1068  86C6 CD 40 8B     		call	ReadFileHeader
+1069  86C9 01 19 00     		ld		bc, CACHE_SZ
+1070  86CC DD 09        		add		ix, bc
+1071  86CE DD E5        		push	ix
+1072  86D0 CD 55 81     			call	CalcFileCache
+1073  86D3 CD 33 85     			call	DisplayFileInfo
+1074  86D6 DD E1        		pop		ix
+1075  86D8
+1076  86D8 CD 07 87     		call	KbdHit
+1077  86DB 38 03        		jr		c, AKey
+1078  86DD C1           	pop		bc
+1079  86DE 18 15        	jr		ReadAllHeadersEnd
+1080  86E0
+1081  86E0              AKey:
+1082  86E0 3A 75 92     		ld		a, (SelFile)
+1083  86E3 3C           		inc		a
+1084  86E4 47           		ld		b, a
+1085  86E5 3A 73 92     		ld		a, (FileCnt)
+1086  86E8 B8           		cp		b
+1087  86E9 28 16        		jr		z, DontInc
+1088  86EB 78           		ld		a, b
+1089  86EC 32 75 92     		ld		(SelFile), a
+1090  86EF CD 0B 88     		call	MoveCursor
+1091  86F2 C1           	pop		bc
+1092  86F3 10 D0        	djnz	NextFile
+1093  86F5
+1094  86F5              ReadAllHeadersEnd:
+1095  86F5 21 CC 91     	ld		hl, MsgClear
+1096  86F8 11 00 0E     	ld		de, LST_LINE_MSG+1 << 8
+1097  86FB 3E 0F        	ld		a, SCR_DEF_CLR
+1098  86FD CD 68 87     	call	PrintStrClr
+1099  8700 C9           	ret
+1100  8701
+1101  8701              DontInc:
+1102  8701 C1           	pop		bc
+1103  8702 18 F1        	jr		ReadAllHeadersEnd
+1104  8704              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+1105  8704
+1106  8704              	include "hccfg.asm"
+# file opened: hccfg.asm
+   1+ 8704              	ifndef	_HCCFG_
+   2+ 8704              	define	_HCCFG_
+   3+ 8704
+   4+ 8704              ;HC specific code, for configuration
+   5+ 8704
+   6+ 8704              HC_CFG_PORT			EQU	$7E
+   7+ 8704
+   8+ 8704              ;BASIC/CPM ROM selection
+   9+ 8704              HC_CFG_ROM_BAS		EQU	%0
+  10+ 8704              HC_CFG_ROM_CPM		EQU	%1
+  11+ 8704
+  12+ 8704              ;Address for ROM paging: 0 or $E000
+  13+ 8704              HC_CFG_ROM_0000		EQU %00
+  14+ 8704              HC_CFG_ROM_E000		EQU %10
+  15+ 8704
+  16+ 8704              ;Cfg. port Enable/Disable
+  17+ 8704              HC_CFG_PORT_DIS		EQU %000
+  18+ 8704              HC_CFG_PORT_EN		EQU	%100
+  19+ 8704
+  20+ 8704              ;Video memory bank: $4000 or $C000
+  21+ 8704              HC_CFG_VID_4000		EQU	%0000
+  22+ 8704              HC_CFG_VID_C000		EQU	%1000
+  23+ 8704
+  24+ 8704
+  25+ 8704              ;Standar BASIC config
+  26+ 8704              HC_CFG_BASIC		EQU	HC_CFG_ROM_BAS | HC_CFG_ROM_0000 | HC_CFG_VID_4000
+  27+ 8704              ;Standar CP/M config
+  28+ 8704              HC_CFG_CPM			EQU	HC_CFG_ROM_CPM | HC_CFG_ROM_E000 | HC_CFG_VID_C000
+  29+ 8704
+  30+ 8704
+  31+ 8704              HC_VID_BANK0		EQU	$4000
+  32+ 8704              HC_VID_BANK1		EQU	$C000
+  33+ 8704
+  34+ 8704              	endif
+# file closed: hccfg.asm
+1107  8704              	include "ui.asm"
+# file opened: ui.asm
+   1+ 8704              ;UI related functions
+   2+ 8704
+   3+ 8704              	ifndef	_UI_
+   4+ 8704              	define	_UI_
+   5+ 8704
+   6+ 8704              	include	"hccfg.asm"
+# file opened: hccfg.asm
+   1++8704              	ifndef	_HCCFG_
+   2++8704 ~            	define	_HCCFG_
+   3++8704 ~
+   4++8704 ~            ;HC specific code, for configuration
+   5++8704 ~
+   6++8704 ~            HC_CFG_PORT			EQU	$7E
+   7++8704 ~
+   8++8704 ~            ;BASIC/CPM ROM selection
+   9++8704 ~            HC_CFG_ROM_BAS		EQU	%0
+  10++8704 ~            HC_CFG_ROM_CPM		EQU	%1
+  11++8704 ~
+  12++8704 ~            ;Address for ROM paging: 0 or $E000
+  13++8704 ~            HC_CFG_ROM_0000		EQU %00
+  14++8704 ~            HC_CFG_ROM_E000		EQU %10
+  15++8704 ~
+  16++8704 ~            ;Cfg. port Enable/Disable
+  17++8704 ~            HC_CFG_PORT_DIS		EQU %000
+  18++8704 ~            HC_CFG_PORT_EN		EQU	%100
+  19++8704 ~
+  20++8704 ~            ;Video memory bank: $4000 or $C000
+  21++8704 ~            HC_CFG_VID_4000		EQU	%0000
+  22++8704 ~            HC_CFG_VID_C000		EQU	%1000
+  23++8704 ~
+  24++8704 ~
+  25++8704 ~            ;Standar BASIC config
+  26++8704 ~            HC_CFG_BASIC		EQU	HC_CFG_ROM_BAS | HC_CFG_ROM_0000 | HC_CFG_VID_4000
+  27++8704 ~            ;Standar CP/M config
+  28++8704 ~            HC_CFG_CPM			EQU	HC_CFG_ROM_CPM | HC_CFG_ROM_E000 | HC_CFG_VID_C000
+  29++8704 ~
+  30++8704 ~
+  31++8704 ~            HC_VID_BANK0		EQU	$4000
+  32++8704 ~            HC_VID_BANK1		EQU	$C000
+  33++8704 ~
+  34++8704              	endif
+# file closed: hccfg.asm
+   7+ 8704
+   8+ 8704              COL             EQU 23728
+   9+ 8704              LINE            EQU 23729               ;Coordinates
+  10+ 8704              LineCol			EQU	COL
+  11+ 8704              CODE			EQU 23681               ;Char to print
+  12+ 8704
+  13+ 8704              CPM_FNT         EQU $25AB
+  14+ 8704
+  15+ 8704              PORT_ZX			EQU	$FE
+  16+ 8704
+  17+ 8704              ;COLORS
+  18+ 8704              CLR_BLACK		EQU 0
+  19+ 8704              CLR_BLUE		EQU 1
+  20+ 8704              CLR_RED			EQU 2
+  21+ 8704              CLR_MAGENTA		EQU 3
+  22+ 8704              CLR_GREEN		EQU 4
+  23+ 8704              CLR_CYAN		EQU	5
+  24+ 8704              CLR_YELLOW		EQU	6
+  25+ 8704              CLR_WHITE		EQU	7
+  26+ 8704              CLR_BRIGHT		EQU	%01000000
+  27+ 8704              CLR_FLASH		EQU	%10000000
+  28+ 8704
+  29+ 8704              ;PAPER
+  30+ 8704              PAPER_BLACK		EQU (CLR_BLACK << 3)
+  31+ 8704              PAPER_BLUE		EQU (CLR_BLUE << 3)
+  32+ 8704              PAPER_RED		EQU (CLR_RED << 3)
+  33+ 8704              PAPER_MAGENTA	EQU (CLR_MAGENTA << 3)
+  34+ 8704              PAPER_GREEN		EQU (CLR_GREEN << 3)
+  35+ 8704              PAPER_CYAN		EQU	(CLR_CYAN << 3)
+  36+ 8704              PAPER_YELLOW	EQU	(CLR_YELLOW << 3)
+  37+ 8704              PAPER_WHITE		EQU	(CLR_WHITE << 3)
+  38+ 8704
+  39+ 8704              ;INK
+  40+ 8704              INK_BLACK		EQU CLR_BLACK
+  41+ 8704              INK_BLUE		EQU CLR_BLUE
+  42+ 8704              INK_RED			EQU CLR_RED
+  43+ 8704              INK_MAGENTA		EQU CLR_MAGENTA
+  44+ 8704              INK_GREEN		EQU CLR_GREEN
+  45+ 8704              INK_CYAN		EQU	CLR_CYAN
+  46+ 8704              INK_YELLOW		EQU	CLR_YELLOW
+  47+ 8704              INK_WHITE		EQU	CLR_WHITE
+  48+ 8704
+  49+ 8704
+  50+ 8704              ;SCR_ATTR_ADDR	EQU 22528
+  51+ 8704              SCR_PIX_LEN		EQU	6144
+  52+ 8704              SCR_ATTR_LEN	EQU	768
+  53+ 8704              SCR_LEN			EQU	SCR_PIX_LEN + SCR_ATTR_LEN
+  54+ 8704              SCR_BYTES_PER_LINE	EQU	32
+  55+ 8704
+  56+ 8704              SCR_COLS		EQU	64
+  57+ 8704              SCR_LINES		EQU 24
+  58+ 8704
+  59+ 8704              ;used for file names list positioning
+  60+ 8704              LST_LINES_CNT	EQU	23
+  61+ 8704              LST_FIRST_LINE	EQU	0
+  62+ 8704              LST_DISK_INFO	EQU 3
+  63+ 8704              LST_FILE_INFO	EQU 7
+  64+ 8704              LST_LINE_MSG	EQU 13
+  65+ 8704              LST_FIRST_COL	EQU	16
+  66+ 8704              LST_MAX_FILES	EQU LST_LINES_CNT * 4
+  67+ 8704
+  68+ 8704              ;key codes
+  69+ 8704              KEY_ESC			EQU	7
+  70+ 8704              KEY_LEFT		EQU	8
+  71+ 8704              KEY_RIGHT		EQU	9
+  72+ 8704              KEY_DOWN		EQU	10
+  73+ 8704              KEY_UP			EQU	11
+  74+ 8704              KEY_BACKSP		EQU 12
+  75+ 8704              KEY_ENTER		EQU	13
+  76+ 8704              KEY_CTRL		EQU	14
+  77+ 8704
+  78+ 8704              SCR_DEF_CLR		EQU INK_WHITE | PAPER_BLUE
+  79+ 8704              SCR_SEL_CLR		EQU INK_BLACK | PAPER_CYAN
+  80+ 8704              SCR_LBL_CLR		EQU	INK_BLACK | PAPER_CYAN
+  81+ 8704
+  82+ 8704              ;Special formating chars
+  83+ 8704              CHR_CR			EQU	13
+  84+ 8704              CHR_LF			EQU	10
+  85+ 8704              CHR_TAB			EQU	09
+  86+ 8704              CHR_EOF			EQU $1A
+  87+ 8704
+  88+ 8704
+  89+ 8704              ;Semi-graphical chars
+  90+ 8704              ;           UC
+  91+ 8704              ;     UL +H-+--+UR
+  92+ 8704              ;        |  |  |
+  93+ 8704              ;     ML +--+--+MR
+  94+ 8704              ;        V C|  |
+  95+ 8704              ;     LL +--+--+LR
+  96+ 8704              ;           DC
+  97+ 8704              CHR_GRID        EQU 127
+  98+ 8704              CHR_V           EQU	128
+  99+ 8704              CHR_MR          EQU	129
+ 100+ 8704              CHR_UR          EQU 130
+ 101+ 8704              CHR_DL          EQU 131
+ 102+ 8704              CHR_DC          EQU 132
+ 103+ 8704              CHR_UC          EQU 133
+ 104+ 8704              CHR_ML          EQU 134
+ 105+ 8704              CHR_H           EQU 135
+ 106+ 8704              CHR_C           EQU 136
+ 107+ 8704              CHR_LR          EQU 137
+ 108+ 8704              CHR_UL          EQU 138
+ 109+ 8704              CHR_FULL        EQU 139
+ 110+ 8704              CHR_HALF        EQU 140
+ 111+ 8704
+ 112+ 8704              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 113+ 8704
+ 114+ 8704              ;Return read char in A
+ 115+ 8704              ReadChar:
+ 116+ 8704 CF           	rst 08
+ 117+ 8705 1B           	DEFB 27
+ 118+ 8706 C9           	ret
+ 119+ 8707
+ 120+ 8707              ;Checks if a key is pressed
+ 121+ 8707              ;Cy=1 if key is pressed
+ 122+ 8707              KbdHit:
+ 123+ 8707 CF           	rst 08
+ 124+ 8708 20           	DEFB 32
+ 125+ 8709 C9           	ret
+ 126+ 870A              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 127+ 870A
+ 128+ 870A              	ifdef _ROM_FNT_
+ 129+ 870A              InitFonts:
+ 130+ 870A                  ;page-in CPM ROM to get fonts
+ 131+ 870A F3               di
+ 132+ 870B 3E 01            ld a, HC_CFG_ROM_CPM
+ 133+ 870D D3 7E            out	(HC_CFG_PORT), a
+ 134+ 870F
+ 135+ 870F 21 AB 25     	ld		hl, CPM_FNT
+ 136+ 8712 11 61 AF     	ld		de, FontTable
+ 137+ 8715 01 68 03     	ld		bc, 872
+ 138+ 8718 ED B0        	ldir
+ 139+ 871A
+ 140+ 871A                  ;restore BASIC ROM
+ 141+ 871A 3E 00            ld a, HC_CFG_ROM_BAS
+ 142+ 871C D3 7E            out	(HC_CFG_PORT), a
+ 143+ 871E FB               ei
+ 144+ 871F
+ 145+ 871F C9           	ret
+ 146+ 8720              	endif
+ 147+ 8720
+ 148+ 8720              ClrScr:
+ 149+ 8720 2A C3 88     	ld		hl, (CurrScrAddr)
+ 150+ 8723 54           	ld		d, h
+ 151+ 8724 5D           	ld		e, l
+ 152+ 8725 13           	inc		de
+ 153+ 8726 01 FF 17     	ld		bc, SCR_PIX_LEN - 1
+ 154+ 8729 36 00        	ld		(hl), 0
+ 155+ 872B ED B0        	ldir
+ 156+ 872D
+ 157+ 872D 23           	inc 	hl
+ 158+ 872E 13           	inc		de
+ 159+ 872F
+ 160+ 872F 01 FF 02     	ld		bc, SCR_ATTR_LEN - 1
+ 161+ 8732 36 0F        	ld		(hl), SCR_DEF_CLR
+ 162+ 8734 ED B0        	ldir
+ 163+ 8736
+ 164+ 8736              	;also set border color
+ 165+ 8736 3E 01        	ld		a, SCR_DEF_CLR >> 3
+ 166+ 8738 D3 FE        	out		(PORT_ZX), a
+ 167+ 873A
+ 168+ 873A 3E 0F        	ld		a, SCR_DEF_CLR
+ 169+ 873C 32 48 5C     	ld		(23624), a
+ 170+ 873F C9           	ret
+ 171+ 8740
+ 172+ 8740              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 173+ 8740              ;IN: HL = str. addr, DE = line/col, str ends with last char bit 7 set
+ 174+ 8740              PrintStr:
+ 175+ 8740 7E           	ld		a, (hl)
+ 176+ 8741 FE 20        	cp		' '
+ 177+ 8743 30 02        	jr		nc, GoodChar
+ 178+ 8745 3E 3F        	ld		a, '?'
+ 179+ 8747              GoodChar:
+ 180+ 8747 CB 7F        	bit		7, a
+ 181+ 8749 CB BF        	res		7, a
+ 182+ 874B 32 81 5C     	ld		(CODE), a
+ 183+ 874E ED 53 B0 5C  	ld		(LineCol), de
+ 184+ 8752 08           	ex		af, af'
+ 185+ 8753 D9           	exx
+ 186+ 8754 E5           	push	hl
+ 187+ 8755 CD 43 88     	call 	PrintChar
+ 188+ 8758 E1           	pop		hl
+ 189+ 8759 D9           	exx
+ 190+ 875A 08           	ex		af, af'
+ 191+ 875B C0           	ret		nz
+ 192+ 875C
+ 193+ 875C 1C           	inc		e
+ 194+ 875D 23           	inc		hl
+ 195+ 875E
+ 196+ 875E 7B           	ld		a, e
+ 197+ 875F FE 40        	cp		64
+ 198+ 8761 38 DD        	jr		c, PrintStr
+ 199+ 8763 1E 00        	ld		e, 0
+ 200+ 8765 14           	inc		d
+ 201+ 8766
+ 202+ 8766 18 D8        	jr		PrintStr
+ 203+ 8768
+ 204+ 8768              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 205+ 8768
+ 206+ 8768              ;IN: HL = string, DE = coords, A = color
+ 207+ 8768              PrintStrClr:
+ 208+ 8768 32 94 87     	ld		(StrClr), a
+ 209+ 876B D5           	push	de
+ 210+ 876C CD 40 87     		call	PrintStr
+ 211+ 876F E1           	pop		hl
+ 212+ 8770              	;get string len.
+ 213+ 8770 7B           	ld		a, e
+ 214+ 8771 95           	sub		l
+ 215+ 8772 1F           	rra
+ 216+ 8773 08           	ex		af, af'
+ 217+ 8774              		;line * 32
+ 218+ 8774 7C           		ld		a, h
+ 219+ 8775 17           		rla
+ 220+ 8776 17           		rla
+ 221+ 8777 11 00 00     		ld	de, 0
+ 222+ 877A 17           		rla
+ 223+ 877B CB 12        		rl	d
+ 224+ 877D 17           		rla
+ 225+ 877E CB 12        		rl	d
+ 226+ 8780 17           		rla
+ 227+ 8781 CB 12        		rl	d
+ 228+ 8783 5F           		ld	e, a
+ 229+ 8784
+ 230+ 8784 26 00        		ld		h, 0
+ 231+ 8786 19           		add		hl, de
+ 232+ 8787 ED 5B C5 88  		ld		de, (CurrScrAttrAddr)
+ 233+ 878B 19           		add		hl, de
+ 234+ 878C 08           	ex		af, af'
+ 235+ 878D 4F           	ld		c, a
+ 236+ 878E 06 00        	ld		b, 0
+ 237+ 8790 54           	ld		d, h
+ 238+ 8791 5D           	ld		e, l
+ 239+ 8792 13           	inc 	de
+ 240+ 8793              StrClr	EQU	$ + 1
+ 241+ 8793 36 28        	ld		(hl), INK_BLACK | PAPER_CYAN
+ 242+ 8795 ED B0        	ldir
+ 243+ 8797 C9           	ret
+ 244+ 8798              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 245+ 8798
+ 246+ 8798              ;IN: B = length, D = line, E = col, A = char, C = horiz/vertical
+ 247+ 8798              DrawLine:
+ 248+ 8798 32 81 5C     	ld		(CODE), a
+ 249+ 879B
+ 250+ 879B 38 04        	jr		c, VertDir
+ 251+ 879D 3E 1C        	ld		a, $1C
+ 252+ 879F 18 02        	jr		StoreDir
+ 253+ 87A1              VertDir:
+ 254+ 87A1 3E 14        	ld		a, $14
+ 255+ 87A3              StoreDir:
+ 256+ 87A3 32 B3 87     	ld		(LineDir), a
+ 257+ 87A6
+ 258+ 87A6              DrawLineLoop:
+ 259+ 87A6 ED 53 B0 5C  	ld		(LineCol), de
+ 260+ 87AA D5           	push	de
+ 261+ 87AB D9           		exx
+ 262+ 87AC E5           		push	hl
+ 263+ 87AD CD 43 88     		call 	PrintChar
+ 264+ 87B0 E1           		pop		hl
+ 265+ 87B1 D9           		exx
+ 266+ 87B2 D1           	pop		de
+ 267+ 87B3              LineDir:
+ 268+ 87B3 1C           	inc		e
+ 269+ 87B4 10 F0        	djnz	DrawLineLoop
+ 270+ 87B6
+ 271+ 87B6 C9           	ret
+ 272+ 87B7
+ 273+ 87B7              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 274+ 87B7
+ 275+ 87B7              DrawHLine:
+ 276+ 87B7 32 C6 87     	ld		(ChrParam), a
+ 277+ 87BA
+ 278+ 87BA 06 10        	ld		b, 16
+ 279+ 87BC 3E 87        	ld		a, CHR_H
+ 280+ 87BE B7           	or		a
+ 281+ 87BF CD 98 87     	call	DrawLine
+ 282+ 87C2
+ 283+ 87C2 06 04        	ld		b, 4
+ 284+ 87C4              DrawUpLine:
+ 285+ 87C4 C5           	push	bc
+ 286+ 87C5              ChrParam	EQU		$ + 1
+ 287+ 87C5 3E 85        		ld		a, CHR_UC
+ 288+ 87C7 D5           		push	de
+ 289+ 87C8 CD F9 87     			call	PrintChar2
+ 290+ 87CB D1           		pop		de
+ 291+ 87CC 13           		inc		de
+ 292+ 87CD
+ 293+ 87CD 06 0B        		ld		b, NAMELEN
+ 294+ 87CF 3E 87        		ld		a, CHR_H
+ 295+ 87D1 B7           		or		a
+ 296+ 87D2 CD 98 87     		call	DrawLine
+ 297+ 87D5 C1           	pop		bc
+ 298+ 87D6 10 EC        	djnz	DrawUpLine
+ 299+ 87D8
+ 300+ 87D8 06 04        	ld		b, 4
+ 301+ 87DA 3E 87        	ld		a, CHR_H
+ 302+ 87DC B7           	or		a
+ 303+ 87DD CD 98 87     	call	DrawLine
+ 304+ 87E0 C9           	ret
+ 305+ 87E1
+ 306+ 87E1
+ 307+ 87E1              DrawVLines:
+ 308+ 87E1 06 04        	ld		b, 4
+ 309+ 87E3 11 10 00     	ld		de, (LST_FIRST_LINE << 8) | LST_FIRST_COL
+ 310+ 87E6              DrawVLinesLoop:
+ 311+ 87E6 C5           	push 	bc
+ 312+ 87E7 D5           	push	de
+ 313+ 87E8 06 17        		ld		b, LST_LINES_CNT
+ 314+ 87EA 3E 80        		ld		a, CHR_V
+ 315+ 87EC 37           		scf
+ 316+ 87ED CD 98 87     		call	DrawLine
+ 317+ 87F0 D1           	pop		de
+ 318+ 87F1 C1           	pop	bc
+ 319+ 87F2 7B           	ld		a, e
+ 320+ 87F3 C6 0C        	add		NAMELEN+1
+ 321+ 87F5 5F           	ld		e, a
+ 322+ 87F6 10 EE        	djnz	DrawVLinesLoop
+ 323+ 87F8 C9           	ret
+ 324+ 87F9
+ 325+ 87F9              PrintChar2:
+ 326+ 87F9 32 81 5C     	ld		(CODE), a
+ 327+ 87FC ED 53 B0 5C  	ld		(LineCol), de
+ 328+ 8800
+ 329+ 8800              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 330+ 8800
+ 331+ 8800              ;IN: A = color mask
+ 332+ 8800              DrawCursor:
+ 333+ 8800 ED 5B 76 92  	ld	de, (CursorAddr)
+ 334+ 8804 06 06        	ld	b, 	(NAMELEN + 1)/2
+ 335+ 8806              DrawCursorLoop:
+ 336+ 8806 12           	ld	(de), a
+ 337+ 8807 13           	inc de
+ 338+ 8808 10 FC        	djnz DrawCursorLoop
+ 339+ 880A C9           	ret
+ 340+ 880B
+ 341+ 880B              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 342+ 880B
+ 343+ 880B              ;IN:	A = file idx.
+ 344+ 880B              MoveCursor:
+ 345+ 880B              	;File idx / SCR_LINES => cursor line & column
+ 346+ 880B 6F           	ld		l, a
+ 347+ 880C 26 00        	ld		h, 0
+ 348+ 880E 0E 17        	ld		c, LST_LINES_CNT
+ 349+ 8810 CD 0E 89     	call	Div					;HL = file column, A = line
+ 350+ 8813
+ 351+ 8813              	;cursor addr = SCR_ATTR_ADDR + (line + LST_FIRST_LINE) * SCR_BYTES_PER_LINE + column * NAMELEN/2
+ 352+ 8813 C6 00        	add		LST_FIRST_LINE
+ 353+ 8815
+ 354+ 8815
+ 355+ 8815 54           	ld d, h
+ 356+ 8816 5D           	ld e, l
+ 357+ 8817 21 00 00     	ld	hl, 0
+ 358+ 881A
+ 359+ 881A              	;line*32
+ 360+ 881A 17           	rla
+ 361+ 881B 17           	rla
+ 362+ 881C 17           	rla
+ 363+ 881D 17           	rla
+ 364+ 881E CB 14        	rl h
+ 365+ 8820 17           	rla
+ 366+ 8821 CB 14        	rl h
+ 367+ 8823 6F           	ld l, a
+ 368+ 8824
+ 369+ 8824
+ 370+ 8824              	;col * 6
+ 371+ 8824 E5           	push	hl					;save line * 32
+ 372+ 8825 3E 06        		ld		a, (NAMELEN + 1)/2
+ 373+ 8827 CD 2E 89     		call	Mul				;HL = column * 12/2
+ 374+ 882A D1           	pop		de
+ 375+ 882B 19           	add		hl, de
+ 376+ 882C
+ 377+ 882C 11 08 00     	ld		de, LST_FIRST_COL/2
+ 378+ 882F ED 4B C5 88  	ld		bc, (CurrScrAttrAddr)
+ 379+ 8833 19           	add		hl, de
+ 380+ 8834 09           	add		hl, bc
+ 381+ 8835
+ 382+ 8835              	;clear old cursor
+ 383+ 8835 3E 0F        	ld		a, SCR_DEF_CLR
+ 384+ 8837 CD 00 88     	call	DrawCursor
+ 385+ 883A
+ 386+ 883A              	;draw new one
+ 387+ 883A 22 76 92     	ld		(CursorAddr), hl
+ 388+ 883D 3E 28        	ld		a, SCR_SEL_CLR
+ 389+ 883F CD 00 88     	call	DrawCursor
+ 390+ 8842
+ 391+ 8842 C9           	ret
+ 392+ 8843
+ 393+ 8843              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 394+ 8843
+ 395+ 8843              PrintChar:
+ 396+ 8843 ED 5B B0 5C      ld		de, (LineCol)
+ 397+ 8847
+ 398+ 8847                  ;calculate 64 column screen address
+ 399+ 8847              	;IN: D = line, E = col
+ 400+ 8847              	;OUT: HL = screen address
+ 401+ 8847
+ 402+ 8847 CB 3B            SRL     E                                       ;col = col/2
+ 403+ 8849 CB 19            RR      C                                       ;mark odd/even column
+ 404+ 884B 7A               LD      A, D                            ;A = line
+ 405+ 884C E6 18            AND 24                                  ;keep only %00011000
+ 406+ 884E 2A C3 88         ld		hl, (CurrScrAddr)
+ 407+ 8851 B4               OR      h								;add screen start address
+ 408+ 8852 67               LD      H, A                            ;save H
+ 409+ 8853 7A               LD      A, D                            ;A = line
+ 410+ 8854 E6 07            AND 7                                   ;keep only %00000111
+ 411+ 8856 0F               RRCA                                    ;%10000011
+ 412+ 8857 0F               RRCA                                    ;%11000001
+ 413+ 8858 0F               RRCA                                    ;%11100000
+ 414+ 8859 B3               OR      E                                       ;add column
+ 415+ 885A 6F               LD      L, A                            ;HL = screen address
+ 416+ 885B
+ 417+ 885B              PrintChar3:
+ 418+ 885B                  ;get font address
+ 419+ 885B E5               PUSH HL
+ 420+ 885C AF                   XOR A
+ 421+ 885D 67                   LD  H, A
+ 422+ 885E 3A 81 5C             LD  A, (CODE)
+ 423+ 8861 D6 20                SUB ' '
+ 424+ 8863 6F                   LD  L, A
+ 425+ 8864 29                   ADD     HL, HL                  ;char code = char code * 8
+ 426+ 8865 29                   ADD     HL, HL                  ;i.e. offset into font table
+ 427+ 8866 29                   ADD     HL, HL
+ 428+ 8867 11 61 AF             LD      DE, FontTable             ;get font table
+ 429+ 886A 19                   ADD     HL, DE
+ 430+ 886B EB                   EX      DE, HL                  ;DE = our char font address
+ 431+ 886C E1               POP     HL
+ 432+ 886D
+ 433+ 886D
+ 434+ 886D                  ;print a char
+ 435+ 886D 06 08            LD      B, 8                            ;char height is 8 lines
+ 436+ 886F              PrintCharLine:
+ 437+ 886F 1A                   LD      A, (DE)                         ;load char line in A
+ 438+ 8870
+ 439+ 8870 CB 79                BIT     7, C                            ;restore correct position of the 2 chars in cell if on odd column
+ 440+ 8872 20 06                JR  	NZ, NoTurn
+ 441+ 8874
+ 442+ 8874 07                   RLCA
+ 443+ 8875 07                   RLCA
+ 444+ 8876 07                   RLCA
+ 445+ 8877 07                   RLCA
+ 446+ 8878 18 01                JR      Store
+ 447+ 887A              NoTurn:
+ 448+ 887A B6                   OR (HL)
+ 449+ 887B              Store:
+ 450+ 887B 77                   LD (HL), A
+ 451+ 887C
+ 452+ 887C 13                   INC     DE                                      ;next char line in font table
+ 453+ 887D 24                   INC     H                                       ;next char line on screen
+ 454+ 887E 10 EF            DJNZ PrintCharLine                  ;last line of char?
+ 455+ 8880
+ 456+ 8880 C9               ret
+ 457+ 8881
+ 458+ 8881              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 459+ 8881
+ 460+ 8881              ;DE = screen coord; Output: DataBuf == read string, terminated at ' ' | $80
+ 461+ 8881              ReadString:
+ 462+ 8881 21 C9 B2     	ld		hl, DataBuf
+ 463+ 8884 D5           	push	de
+ 464+ 8885 DD E1        	pop		ix
+ 465+ 8887
+ 466+ 8887              ReadStringLoop:
+ 467+ 8887 D5           	push	de
+ 468+ 8888 E5           	push	hl
+ 469+ 8889 CD 04 87     		call ReadChar
+ 470+ 888C E1           	pop		hl
+ 471+ 888D D1           	pop		de
+ 472+ 888E
+ 473+ 888E FE 0D        	cp	KEY_ENTER
+ 474+ 8890 C8           	ret z
+ 475+ 8891
+ 476+ 8891 FE 0C        	cp  KEY_BACKSP
+ 477+ 8893 20 0F        	jr	nz, ReadStrChar
+ 478+ 8895
+ 479+ 8895 E5           	push hl
+ 480+ 8896 01 CA B2     	ld   bc, DataBuf+1
+ 481+ 8899 ED 42        	sbc	 hl, bc
+ 482+ 889B E1           	pop  hl
+ 483+ 889C 38 16        	jr   c, ReadStrPrint
+ 484+ 889E
+ 485+ 889E 1B           	dec	de
+ 486+ 889F 2B           	dec	hl
+ 487+ 88A0 36 20        	ld	(hl), ' '
+ 488+ 88A2 18 10        	jr	ReadStrPrint
+ 489+ 88A4
+ 490+ 88A4              ReadStrChar:
+ 491+ 88A4 FE 20        	cp	' '
+ 492+ 88A6 38 DF        	jr	c, ReadStringLoop
+ 493+ 88A8 FE 7F        	cp  127
+ 494+ 88AA 30 DB        	jr	nc, ReadStringLoop
+ 495+ 88AC
+ 496+ 88AC              	;Check end of string and go back if found.
+ 497+ 88AC 46           	ld	b, (hl)
+ 498+ 88AD CB 78        	bit 7, b
+ 499+ 88AF 20 03        	jr	nz, ReadStrPrint
+ 500+ 88B1
+ 501+ 88B1 77           	ld	(hl), a
+ 502+ 88B2 23           	inc	hl
+ 503+ 88B3 13           	inc	de
+ 504+ 88B4
+ 505+ 88B4              ReadStrPrint:
+ 506+ 88B4 E5           	push	hl
+ 507+ 88B5 D5           	push	de
+ 508+ 88B6 21 C9 B2     	ld		hl, DataBuf
+ 509+ 88B9 DD E5        	push	ix
+ 510+ 88BB D1           	pop		de
+ 511+ 88BC CD 40 87     	call	PrintStr
+ 512+ 88BF D1           	pop		de
+ 513+ 88C0 E1           	pop		hl
+ 514+ 88C1
+ 515+ 88C1 18 C4        	jr		ReadStringLoop
+ 516+ 88C3
+ 517+ 88C3 00 40        CurrScrAddr		DEFW	16384
+ 518+ 88C5 00 58        CurrScrAttrAddr	DEFW	22528
+ 519+ 88C7
+ 520+ 88C7                 	endif
+# file closed: ui.asm
+1108  88C7              	include "math.asm"
+# file opened: math.asm
+   1+ 88C7              	ifndef	_MATH_
+   2+ 88C7              	define	_MATH_
+   3+ 88C7
+   4+ 88C7              ;The folowing 3 routines where inspired or taken from: Milos "baze" Bazelides, baze@stonline.sk
+   5+ 88C7              ;http://map.tni.nl/sources/external/z80bits.html
+   6+ 88C7
+   7+ 88C7
+   8+ 88C7              Word2Txt:
+   9+ 88C7              	IFUSED
+  10+ 88C7 D5           	push	de
+  11+ 88C8 CD E8 88     		call	Word2Txt_
+  12+ 88CB D1           	pop		de
+  13+ 88CC
+  14+ 88CC 06 04        	ld		b, 4
+  15+ 88CE CD DD 88     	call	StrippLeading0
+  16+ 88D1 C9           	ret
+  17+ 88D2
+  18+ 88D2              Byte2Txt:
+  19+ 88D2 D5           	push	de
+  20+ 88D3 CD F4 88     		call	Byte2Txt_
+  21+ 88D6 D1           	pop		de
+  22+ 88D7
+  23+ 88D7 06 02        	ld		b, 2
+  24+ 88D9 CD DD 88     	call	StrippLeading0
+  25+ 88DC C9           	ret
+  26+ 88DD              	ENDIF
+  27+ 88DD
+  28+ 88DD
+  29+ 88DD              StrippLeading0:
+  30+ 88DD 1A           	ld		a, (de)
+  31+ 88DE FE 31        	cp		'1'
+  32+ 88E0 D0           	ret		nc
+  33+ 88E1
+  34+ 88E1 3E 20        	ld		a, ' '
+  35+ 88E3 12           	ld		(de), a
+  36+ 88E4 13           	inc		de
+  37+ 88E5 10 F6        	djnz	StrippLeading0
+  38+ 88E7 C9           	ret
+  39+ 88E8
+  40+ 88E8
+  41+ 88E8              ;Converts the number in HL to ASCII in decimal string at DE
+  42+ 88E8              Word2Txt_:
+  43+ 88E8 01 F0 D8     	ld bc, -10000
+  44+ 88EB CD 03 89     	call DigitLoop
+  45+ 88EE 01 18 FC     	ld bc, -1000
+  46+ 88F1 CD 03 89     	call DigitLoop
+  47+ 88F4              Byte2Txt_:
+  48+ 88F4 01 9C FF     	ld bc, -100
+  49+ 88F7 CD 03 89     	call DigitLoop
+  50+ 88FA 01 F6 FF     	ld bc, -10
+  51+ 88FD CD 03 89     	call DigitLoop
+  52+ 8900 01 FF FF     	ld bc, -1
+  53+ 8903
+  54+ 8903              DigitLoop:
+  55+ 8903 3E 2F        	ld	a, '0' - 1
+  56+ 8905              DivNrLoop:
+  57+ 8905 3C           	inc	a			;increase reminder
+  58+ 8906 09           	add	hl, bc		;substract divizor
+  59+ 8907 38 FC        	jr	c, DivNrLoop	;still dividing?
+  60+ 8909 ED 42        	sbc	hl, bc		;nope, restore
+  61+ 890B
+  62+ 890B 12           	ld (de), a
+  63+ 890C 13           	inc de
+  64+ 890D C9           	ret
+  65+ 890E
+  66+ 890E
+  67+ 890E              ;Input: HL = Dividend, C = Divisor
+  68+ 890E              ;Output: HL = Quotient, A = Remainder
+  69+ 890E              ;Warning: doesn't work with divisor >= $80
+  70+ 890E              Div:
+  71+ 890E              	IFUSED
+  72+ 890E AF           	xor a
+  73+ 890F 06 10        	ld b, 16
+  74+ 8911
+  75+ 8911              DivLoop:
+  76+ 8911 29           	add	hl,hl
+  77+ 8912 17           	rla
+  78+ 8913 B9           	cp	c
+  79+ 8914 38 02        	jr	c, NoSub
+  80+ 8916 91           	sub	c
+  81+ 8917 2C           	inc	l
+  82+ 8918              NoSub:
+  83+ 8918 10 F7        	djnz DivLoop
+  84+ 891A
+  85+ 891A C9           	ret
+  86+ 891B              	ENDIF
+  87+ 891B
+  88+ 891B              ;Input: A:C = Dividend, DE = Divisor, HL = 0
+  89+ 891B              ;Output: A:C = Quotient, HL = Remainder
+  90+ 891B              Div2:
+  91+ 891B 21 00 00     	ld hl, 0
+  92+ 891E 06 10        	ld b, 16
+  93+ 8920              Div2Loop:
+  94+ 8920 CB 31        	sll c		; unroll 16 times
+  95+ 8922 17           	rla			; ...
+  96+ 8923 ED 6A        	adc	hl,hl		; ...
+  97+ 8925 ED 52        	sbc	hl,de		; ...
+  98+ 8927 30 02        	jr	nc,$+4		; ...
+  99+ 8929 19           	add	hl,de		; ...
+ 100+ 892A 0D           	dec	c		; ...
+ 101+ 892B 10 F3        	djnz Div2Loop
+ 102+ 892D C9           	ret
+ 103+ 892E
+ 104+ 892E
+ 105+ 892E              ;Input: A = Multiplier, DE = Multiplicand
+ 106+ 892E              ;Output: A:HL = Product
+ 107+ 892E              Mul:
+ 108+ 892E              	IFUSED
+ 109+ 892E 21 00 00     	ld hl, 0
+ 110+ 8931 01 00 07     	ld bc, $0700
+ 111+ 8934
+ 112+ 8934 87           	add	a, a		; optimised 1st iteration
+ 113+ 8935 30 02        	jr	nc, MulLoop
+ 114+ 8937 62           	ld	h, d
+ 115+ 8938 6B           	ld	l, e
+ 116+ 8939
+ 117+ 8939              MulLoop:
+ 118+ 8939 29           	add	hl,hl
+ 119+ 893A 17           	rla
+ 120+ 893B 30 02        	jr	nc, NoAdd
+ 121+ 893D 19           	add	hl,de
+ 122+ 893E 89           	adc	a,c
+ 123+ 893F              NoAdd:
+ 124+ 893F 10 F8        	djnz MulLoop
+ 125+ 8941
+ 126+ 8941 C9           	ret
+ 127+ 8942              	ENDIF
+ 128+ 8942
+ 129+ 8942              	endif
+# file closed: math.asm
+1109  8942              	include "disk.asm"
+# file opened: disk.asm
+   1+ 8942              ;HC IF1 routines and constants
+   2+ 8942
+   3+ 8942              ;IF1 routines error codes, also returned by BASIC commands
+   4+ 8942              ;12 = Writing to a 'read' file
+   5+ 8942              ;13 = Reading a 'write' file
+   6+ 8942              ;14 = Disk 'write' protected (by hardware, disk notch open)
+   7+ 8942              ;15 = Disk full (disk or catalog full)
+   8+ 8942              ;16 = Disk error (hardware error)
+   9+ 8942              ;17 = File not found
+  10+ 8942              ;23 = Disk R/O (disk change detected, software R/O)
+  11+ 8942              ;24 = File R/O (attempting to delete or copy a file with R/O attribute)
+  12+ 8942
+  13+ 8942              ;Error codes returned by the low level IF1 RWTS routine, from "ABC de calculatoare personale..." book.
+  14+ 8942              ;00h = OK
+  15+ 8942              ;08h = cannot format disk
+  16+ 8942              ;10h = disk protected (read-only?)
+  17+ 8942              ;20h = volume error
+  18+ 8942              ;40h = drive error
+  19+ 8942              ;80h = reading error
+  20+ 8942              ;Codes I encountered:
+  21+ 8942              ;04h = a CP/M disk was inserted instead of a BASIC one
+  22+ 8942
+  23+ 8942
+  24+ 8942              	ifndef	_DISK_
+  25+ 8942              	define	_DISK_
+  26+ 8942
+  27+ 8942              	include	"math.asm"
+# file opened: math.asm
+   1++8942              	ifndef	_MATH_
+   2++8942 ~            	define	_MATH_
+   3++8942 ~
+   4++8942 ~            ;The folowing 3 routines where inspired or taken from: Milos "baze" Bazelides, baze@stonline.sk
+   5++8942 ~            ;http://map.tni.nl/sources/external/z80bits.html
+   6++8942 ~
+   7++8942 ~
+   8++8942 ~            Word2Txt:
+   9++8942 ~            	IFUSED
+  10++8942 ~            	push	de
+  11++8942 ~            		call	Word2Txt_
+  12++8942 ~            	pop		de
+  13++8942 ~
+  14++8942 ~            	ld		b, 4
+  15++8942 ~            	call	StrippLeading0
+  16++8942 ~            	ret
+  17++8942 ~
+  18++8942 ~            Byte2Txt:
+  19++8942 ~            	push	de
+  20++8942 ~            		call	Byte2Txt_
+  21++8942 ~            	pop		de
+  22++8942 ~
+  23++8942 ~            	ld		b, 2
+  24++8942 ~            	call	StrippLeading0
+  25++8942 ~            	ret
+  26++8942 ~            	ENDIF
+  27++8942 ~
+  28++8942 ~
+  29++8942 ~            StrippLeading0:
+  30++8942 ~            	ld		a, (de)
+  31++8942 ~            	cp		'1'
+  32++8942 ~            	ret		nc
+  33++8942 ~
+  34++8942 ~            	ld		a, ' '
+  35++8942 ~            	ld		(de), a
+  36++8942 ~            	inc		de
+  37++8942 ~            	djnz	StrippLeading0
+  38++8942 ~            	ret
+  39++8942 ~
+  40++8942 ~
+  41++8942 ~            ;Converts the number in HL to ASCII in decimal string at DE
+  42++8942 ~            Word2Txt_:
+  43++8942 ~            	ld bc, -10000
+  44++8942 ~            	call DigitLoop
+  45++8942 ~            	ld bc, -1000
+  46++8942 ~            	call DigitLoop
+  47++8942 ~            Byte2Txt_:
+  48++8942 ~            	ld bc, -100
+  49++8942 ~            	call DigitLoop
+  50++8942 ~            	ld bc, -10
+  51++8942 ~            	call DigitLoop
+  52++8942 ~            	ld bc, -1
+  53++8942 ~
+  54++8942 ~            DigitLoop:
+  55++8942 ~            	ld	a, '0' - 1
+  56++8942 ~            DivNrLoop:
+  57++8942 ~            	inc	a			;increase reminder
+  58++8942 ~            	add	hl, bc		;substract divizor
+  59++8942 ~            	jr	c, DivNrLoop	;still dividing?
+  60++8942 ~            	sbc	hl, bc		;nope, restore
+  61++8942 ~
+  62++8942 ~            	ld (de), a
+  63++8942 ~            	inc de
+  64++8942 ~            	ret
+  65++8942 ~
+  66++8942 ~
+  67++8942 ~            ;Input: HL = Dividend, C = Divisor
+  68++8942 ~            ;Output: HL = Quotient, A = Remainder
+  69++8942 ~            ;Warning: doesn't work with divisor >= $80
+  70++8942 ~            Div:
+  71++8942 ~            	IFUSED
+  72++8942 ~            	xor a
+  73++8942 ~            	ld b, 16
+  74++8942 ~
+  75++8942 ~            DivLoop:
+  76++8942 ~            	add	hl,hl
+  77++8942 ~            	rla
+  78++8942 ~            	cp	c
+  79++8942 ~            	jr	c, NoSub
+  80++8942 ~            	sub	c
+  81++8942 ~            	inc	l
+  82++8942 ~            NoSub:
+  83++8942 ~            	djnz DivLoop
+  84++8942 ~
+  85++8942 ~            	ret
+  86++8942 ~            	ENDIF
+  87++8942 ~
+  88++8942 ~            ;Input: A:C = Dividend, DE = Divisor, HL = 0
+  89++8942 ~            ;Output: A:C = Quotient, HL = Remainder
+  90++8942 ~            Div2:
+  91++8942 ~            	ld hl, 0
+  92++8942 ~            	ld b, 16
+  93++8942 ~            Div2Loop:
+  94++8942 ~            	sll c		; unroll 16 times
+  95++8942 ~            	rla			; ...
+  96++8942 ~            	adc	hl,hl		; ...
+  97++8942 ~            	sbc	hl,de		; ...
+  98++8942 ~            	jr	nc,$+4		; ...
+  99++8942 ~            	add	hl,de		; ...
+ 100++8942 ~            	dec	c		; ...
+ 101++8942 ~            	djnz Div2Loop
+ 102++8942 ~            	ret
+ 103++8942 ~
+ 104++8942 ~
+ 105++8942 ~            ;Input: A = Multiplier, DE = Multiplicand
+ 106++8942 ~            ;Output: A:HL = Product
+ 107++8942 ~            Mul:
+ 108++8942 ~            	IFUSED
+ 109++8942 ~            	ld hl, 0
+ 110++8942 ~            	ld bc, $0700
+ 111++8942 ~
+ 112++8942 ~            	add	a, a		; optimised 1st iteration
+ 113++8942 ~            	jr	nc, MulLoop
+ 114++8942 ~            	ld	h, d
+ 115++8942 ~            	ld	l, e
+ 116++8942 ~
+ 117++8942 ~            MulLoop:
+ 118++8942 ~            	add	hl,hl
+ 119++8942 ~            	rla
+ 120++8942 ~            	jr	nc, NoAdd
+ 121++8942 ~            	add	hl,de
+ 122++8942 ~            	adc	a,c
+ 123++8942 ~            NoAdd:
+ 124++8942 ~            	djnz MulLoop
+ 125++8942 ~
+ 126++8942 ~            	ret
+ 127++8942 ~            	ENDIF
+ 128++8942 ~
+ 129++8942              	endif
+# file closed: math.asm
+  28+ 8942
+  29+ 8942              DRIVE_CUR_BAS	EQU 0
+  30+ 8942              DRIVE_A_BAS		EQU	1
+  31+ 8942              DRIVE_B_BAS		EQU	2
+  32+ 8942              DRIVE_A_CPM		EQU	0
+  33+ 8942              DRIVE_B_CPM		EQU	1
+  34+ 8942              ;Disk geometry stuff
+  35+ 8942              SPT				EQU	16			;sectors per track
+  36+ 8942              SECT_SZ			EQU	256			;sector size in bytes
+  37+ 8942              TRACK_CNT		EQU	80			;track count
+  38+ 8942              HEAD_CNT		EQU	2			;disk face count
+  39+ 8942              AU_SZ			EQU	2048		;allocation unit size in bytes (8 sectors, half of a track)
+  40+ 8942              EXT_SZ			EQU	32			;directory entry size
+  41+ 8942              DIR_TRK_CNT		EQU	1			;tracks rezerved for directory
+  42+ 8942              EXT_AU_CNT		EQU 8			;allocation units in one extension
+  43+ 8942              SPAL			EQU	(AU_SZ/SECT_SZ);sectors per allocation unit
+  44+ 8942              MAX_EXT_CNT		EQU	(SPT * DIR_TRK_CNT * SECT_SZ / EXT_SZ);maximum directory entries
+  45+ 8942              MAX_FREE_AU_CNT		EQU	((TRACK_CNT * HEAD_CNT - DIR_TRK_CNT) * SPT * SECT_SZ)/AU_SZ ;max free allocation units (318)
+  46+ 8942              REC_SZ			EQU 128			;cp/m record size
+  47+ 8942              DEL_MARKER		EQU	$E5
+  48+ 8942              EOF_MARKER		EQU	$1B
+  49+ 8942
+  50+ 8942
+  51+ 8942              ;Extension structure (directory entry)
+  52+ 8942              EXT_DEL_FLAG	EQU	0
+  53+ 8942              EXT_NAME		EQU 1
+  54+ 8942              EXT_IDX			EQU 12
+  55+ 8942              EXT_S1			EQU 13
+  56+ 8942              EXT_S2			EQU 14
+  57+ 8942              EXT_RC			EQU	15
+  58+ 8942              EXT_AU0			EQU	16
+  59+ 8942              EXT_AU1			EQU	18
+  60+ 8942              EXT_AU2			EQU	20
+  61+ 8942              EXT_AU3			EQU	22
+  62+ 8942              EXT_AU4			EQU	24
+  63+ 8942              EXT_AU5			EQU	26
+  64+ 8942              EXT_AU6			EQU	28
+  65+ 8942              EXT_AU7			EQU	30
+  66+ 8942              EXT_SIZE		EQU 32
+  67+ 8942
+  68+ 8942              ;FCB structure
+  69+ 8942              FCB_DRIVE		EQU 0
+  70+ 8942              FCB_NAME		EQU EXT_NAME
+  71+ 8942              FCB_EX_IDX		EQU EXT_IDX
+  72+ 8942              FCB_S1			EQU EXT_S1
+  73+ 8942              FCB_S2			EQU EXT_S2
+  74+ 8942              FCB_RC			EQU	EXT_RC
+  75+ 8942              FCB_AU			EQU	EXT_AU0
+  76+ 8942              FCB_CR			EQU	32
+  77+ 8942              FCB_R0			EQU 33
+  78+ 8942              FCB_R1			EQU 34
+  79+ 8942              FCB_R2			EQU 35
+  80+ 8942              FCB_SIZE		EQU 36
+  81+ 8942
+  82+ 8942
+  83+ 8942
+  84+ 8942              ;System variables for disk
+  85+ 8942              DSTR1			EQU	$5CD6		;drive
+  86+ 8942              FSTR1			EQU	$5CDC		;file name
+  87+ 8942              NSTR1			EQU	$5CDA		;name length
+  88+ 8942              HD11			EQU	$5CED		;BDOS argument
+  89+ 8942              COPIES			EQU	$5CEF		;BDOS function
+  90+ 8942
+  91+ 8942              ERRSP			EQU $5C3D
+  92+ 8942              ERRNR			EQU $5C3A
+  93+ 8942              ERRMSG			EQU	$0260
+  94+ 8942
+  95+ 8942              PRN_BUF			EQU	23296
+  96+ 8942
+  97+ 8942              ;STR_COPYRIGHT	EQU	$1539
+  98+ 8942
+  99+ 8942              REPDEL			EQU	23561
+ 100+ 8942              REPPER			EQU	23562
+ 101+ 8942              PIP				EQU	23609
+ 102+ 8942
+ 103+ 8942
+ 104+ 8942              ;RWTS routine commands
+ 105+ 8942              RWTS_CMD_POS	EQU	0			;position head
+ 106+ 8942              RWTS_CMD_READ	EQU	1			;read sector
+ 107+ 8942              RWTS_CMD_WRITE	EQU	2			;write sector
+ 108+ 8942              RWTS_CMD_FMT	EQU	4			;format all tracks
+ 109+ 8942
+ 110+ 8942
+ 111+ 8942              ;File name stuff
+ 112+ 8942              NAMELEN			EQU	11			;name length
+ 113+ 8942              RO_POS			EQU	8			;read-only attribute position in name
+ 114+ 8942              SYS_POS			EQU	9			;system attribute position in name
+ 115+ 8942
+ 116+ 8942              ;File types (first byte in header)
+ 117+ 8942              PROG_TYPE		EQU	0			;program
+ 118+ 8942              NUMB_TYPE		EQU	1			;number array
+ 119+ 8942              CHAR_TYPE		EQU	2			;char array
+ 120+ 8942              BYTE_TYPE		EQU	3			;bytes
+ 121+ 8942              TEXT_TYPE		EQU	4			;text, >= 4
+ 122+ 8942
+ 123+ 8942              ;File header offsets
+ 124+ 8942              HDR_TYPE		EQU	0
+ 125+ 8942              HDR_LEN			EQU 1
+ 126+ 8942              HDR_ADDR		EQU 3
+ 127+ 8942              HDR_PLEN		EQU	5
+ 128+ 8942              HDR_LINE		EQU 7
+ 129+ 8942              HDR_SZ			EQU	9
+ 130+ 8942
+ 131+ 8942              ;BASIC disk channel structure
+ 132+ 8942              CH_RW_FLAG		EQU 11
+ 133+ 8942              CH_FCB			EQU	12
+ 134+ 8942              CH_DATA			EQU	50
+ 135+ 8942              CH_DMA			EQU CH_DATA - CH_FCB	;offset of DMA from start of FCB
+ 136+ 8942
+ 137+ 8942              CACHE_NAME		EQU	0					;11B
+ 138+ 8942              CACHE_FIRST_AU	EQU	NAMELEN				;2B
+ 139+ 8942              CACHE_AU_CNT	EQU	CACHE_FIRST_AU + 2	;2B
+ 140+ 8942              CACHE_FLAG		EQU CACHE_AU_CNT + 2	;1B
+ 141+ 8942              CACHE_HDR		EQU	CACHE_FLAG + 1		;9B
+ 142+ 8942              CACHE_SZ		EQU	25					;11 + 2 + 2 + 1 + 9
+ 143+ 8942
+ 144+ 8942              LOAD_ADDR		EQU	2625		;address of the load procedure in IF1 ROM
+ 145+ 8942
+ 146+ 8942              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 147+ 8942              IF1Init:
+ 148+ 8942 CF           	rst		08
+ 149+ 8943 31           	defb	49		;create system variables
+ 150+ 8944 C9           	ret
+ 151+ 8945
+ 152+ 8945              ;ReadWriteTrackSector
+ 153+ 8945              ;A=command: 0, 1, 2, 4
+ 154+ 8945              RWTS:
+ 155+ 8945 32 D0 8B     	ld (RWTSCmd), a
+ 156+ 8948 21 C5 8B     	ld hl, RWTSParams
+ 157+ 894B 22 ED 5C     	ld (HD11), hl
+ 158+ 894E CF           	rst 08
+ 159+ 894F 3A           	DEFB 58
+ 160+ 8950 C9           	ret
+ 161+ 8951
+ 162+ 8951
+ 163+ 8951              ;D = sector, E = track
+ 164+ 8951              ;HL = dma
+ 165+ 8951              ReadOneDiskSector:
+ 166+ 8951 22 CA 8B     	ld (RWTSDMA), hl
+ 167+ 8954 ED 53 C8 8B  	ld (RWTSTrack), de
+ 168+ 8958              	;ld (RWTSDrive), a
+ 169+ 8958 3E 01        	ld a, RWTS_CMD_READ
+ 170+ 895A 18 E9        	jr	RWTS
+ 171+ 895C
+ 172+ 895C              ;D = sector, E = track
+ 173+ 895C              ;HL = dma
+ 174+ 895C              WriteOneDiskSector:
+ 175+ 895C 22 CA 8B     	ld (RWTSDMA), hl
+ 176+ 895F ED 53 C8 8B  	ld (RWTSTrack), de
+ 177+ 8963              	;ld (RWTSDrive), a
+ 178+ 8963 3E 02        	ld a, RWTS_CMD_WRITE
+ 179+ 8965 18 DE        	jr	RWTS
+ 180+ 8967
+ 181+ 8967              FormatDisk:
+ 182+ 8967 21 C9 B2     	ld		hl, DataBuf
+ 183+ 896A 36 E5        	ld		(hl), DEL_MARKER
+ 184+ 896C 22 CA 8B     	ld 		(RWTSDMA), hl
+ 185+ 896F 3E 04        	ld 		a, RWTS_CMD_FMT
+ 186+ 8971 CD 45 89     	call	RWTS
+ 187+ 8974 3A D1 8B     	ld		a, (RWTSRes)
+ 188+ 8977 C9           	ret
+ 189+ 8978
+ 190+ 8978              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 191+ 8978
+ 192+ 8978              ;Allocation unit no. to track/sector
+ 193+ 8978              ;Formula: T=(AllocUnit*SPAL)/SPT; Sect=T mod SPT; Track=T/2 (2 disk faces); Head=T mod 2
+ 194+ 8978              ;IN:  HL=alloc. unit no.
+ 195+ 8978              ;OUT: B=sector; C=track (head is determined by the sector number)
+ 196+ 8978              AU2TS:
+ 197+ 8978 0E 02        	ld c, SPT/SPAL
+ 198+ 897A CD 0E 89     	call Div					;A = sector
+ 199+ 897D F5           	push af
+ 200+ 897E ~            		/*
+ 201+ 897E ~            		ld c, HEAD_CNT
+ 202+ 897E ~            		call Div				;L = track, A = head (0 or 1)
+ 203+ 897E ~            		*/
+ 204+ 897E AF           		xor a
+ 205+ 897F CB 1C        		rr h
+ 206+ 8981 CB 1D        		rr l
+ 207+ 8983 CB 1F        		rr a
+ 208+ 8985
+ 209+ 8985 4D           		ld c, l
+ 210+ 8986 06 00        		ld b, 0
+ 211+ 8988 B7           		or a
+ 212+ 8989 28 02        		jr z, Track0
+ 213+ 898B 06 10        		ld b, SPT
+ 214+ 898D              Track0:
+ 215+ 898D F1           	pop af
+ 216+ 898E B7           	or a
+ 217+ 898F 28 02        	jr z, FirstAU
+ 218+ 8991 3E 08        	ld a, SPAL
+ 219+ 8993              FirstAU:
+ 220+ 8993 80           	add a, b
+ 221+ 8994 47           	ld  b, a
+ 222+ 8995 C9           	ret
+ 223+ 8996
+ 224+ 8996              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 225+ 8996
+ 226+ 8996              ;Checks the allocation units number used in extension
+ 227+ 8996              ;IN:	IX = extension addr
+ 228+ 8996              ;OUT:	B = no. of allocation units used
+ 229+ 8996              ;		C = no. of records used in ext.
+ 230+ 8996              ;		HL = first alloc. unit no.
+ 231+ 8996              ;		DE = last alloc. unit no.
+ 232+ 8996              CheckExtAlloc:
+ 233+ 8996 DD E5        	push ix
+ 234+ 8998 01 0F 00     		ld bc, EXT_RC
+ 235+ 899B DD 09        		add ix, bc
+ 236+ 899D DD 4E 00     		ld c, (ix)			;save rec. no.
+ 237+ 89A0 DD 23        		inc ix
+ 238+ 89A2 DD 6E 00     		ld l, (ix)
+ 239+ 89A5 DD 66 01     		ld h, (ix + 1)
+ 240+ 89A8 06 08        		ld b, EXT_AU_CNT
+ 241+ 89AA              CheckAU:
+ 242+ 89AA DD 7E 00     		ld a, (ix)
+ 243+ 89AD DD B6 01     		or (ix + 1)
+ 244+ 89B0 28 0C        		jr z, CheckAUEnd
+ 245+ 89B2 DD 5E 00     		ld e, (ix)
+ 246+ 89B5 DD 56 01     		ld d, (ix + 1)
+ 247+ 89B8 DD 23        		inc ix
+ 248+ 89BA DD 23        		inc ix
+ 249+ 89BC 10 EC        		djnz CheckAU
+ 250+ 89BE              CheckAUEnd:
+ 251+ 89BE 3E 08        		ld a, EXT_AU_CNT
+ 252+ 89C0 90           		sub b
+ 253+ 89C1 47           		ld b, a
+ 254+ 89C2 DD E1        	pop ix
+ 255+ 89C4 C9           	ret
+ 256+ 89C5
+ 257+ 89C5              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 258+ 89C5
+ 259+ 89C5              ;Input: TrackBuffer
+ 260+ 89C5              ;Output: DataBuf = used block count (2 bytes), used block numbers (2 bytes each)
+ 261+ 89C5              ReadUsedBlocksList:
+ 262+ 89C5 DD 21 FD 9E  	ld		ix, TrackBuf			;source buffer
+ 263+ 89C9 21 C9 B2     	ld		hl, DataBuf 			;destination buffer
+ 264+ 89CC 01 3E 01     	ld		bc, MAX_FREE_AU_CNT		;loop counter
+ 265+ 89CF 11 02 00     	ld		de, 2					;counter of used blocks, start with 2
+ 266+ 89D2 73           	ld		(hl), e
+ 267+ 89D3 23           	inc		hl
+ 268+ 89D4 72           	ld		(hl), d
+ 269+ 89D5 23           	inc		hl
+ 270+ 89D6
+ 271+ 89D6              	;Add blocks 0 and 1 for directory
+ 272+ 89D6 11 00 00     	ld		de, 0
+ 273+ 89D9 73           	ld		(hl), e
+ 274+ 89DA 23           	inc		hl
+ 275+ 89DB 72           	ld		(hl), d
+ 276+ 89DC 23           	inc		hl
+ 277+ 89DD
+ 278+ 89DD 13           	inc		de
+ 279+ 89DE 73           	ld		(hl), e
+ 280+ 89DF 23           	inc		hl
+ 281+ 89E0 72           	ld		(hl), d
+ 282+ 89E1 23           	inc		hl
+ 283+ 89E2
+ 284+ 89E2              ReadUsedBlocksLoop:
+ 285+ 89E2 AF           	xor		a
+ 286+ 89E3 DD BE 00     	cp		(ix)
+ 287+ 89E6 20 2A        	jr		nz, ReadUsedBlocksSkip2;skip dir entry because it's not valid
+ 288+ 89E8
+ 289+ 89E8 DD E5        	push	ix
+ 290+ 89EA C5           	push	bc
+ 291+ 89EB 06 08        		ld		b, EXT_AU_CNT
+ 292+ 89ED 11 10 00     		ld		de, EXT_AU0
+ 293+ 89F0 DD 19        		add		ix, de
+ 294+ 89F2
+ 295+ 89F2              ReadUsedBlocksLoop2:
+ 296+ 89F2 DD 5E 00     		ld		e, (ix)
+ 297+ 89F5 DD 56 01     		ld		d, (ix+1)
+ 298+ 89F8 7B           		ld		a, e
+ 299+ 89F9 B2           		or		d
+ 300+ 89FA 28 13        		jr		z, ReadUsedBlocksSkip;end dir entry reading when the AU number is 0
+ 301+ 89FC
+ 302+ 89FC 73           		ld		(hl), e
+ 303+ 89FD 23           		inc		hl
+ 304+ 89FE 72           		ld		(hl), d
+ 305+ 89FF 23           		inc		hl
+ 306+ 8A00
+ 307+ 8A00 DD 23        		inc		ix
+ 308+ 8A02 DD 23        		inc		ix
+ 309+ 8A04
+ 310+ 8A04 ED 5B C9 B2  		ld		de, (DataBuf)
+ 311+ 8A08 13           		inc		de
+ 312+ 8A09 ED 53 C9 B2  		ld		(DataBuf), de
+ 313+ 8A0D
+ 314+ 8A0D 10 E3        		djnz	ReadUsedBlocksLoop2
+ 315+ 8A0F
+ 316+ 8A0F
+ 317+ 8A0F              ReadUsedBlocksSkip:
+ 318+ 8A0F C1           	pop		bc
+ 319+ 8A10 DD E1        	pop		ix
+ 320+ 8A12              ReadUsedBlocksSkip2:
+ 321+ 8A12 11 20 00     	ld		de, EXT_SZ
+ 322+ 8A15 DD 19        	add		ix, de
+ 323+ 8A17
+ 324+ 8A17 0B           	dec		bc
+ 325+ 8A18 78           	ld		a, b
+ 326+ 8A19 B1           	or		c
+ 327+ 8A1A 20 C6        	jr		nz, ReadUsedBlocksLoop
+ 328+ 8A1C
+ 329+ 8A1C C9           	ret
+ 330+ 8A1D
+ 331+ 8A1D              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 332+ 8A1D              ;Reads 8 sectors for an AU
+ 333+ 8A1D              ;HL = block number, DE = destination buffer
+ 334+ 8A1D              ReadFSBlock:
+ 335+ 8A1D D5           	push	de
+ 336+ 8A1E CD 78 89     		call	AU2TS		;B=sector, C=track
+ 337+ 8A21 E1           	pop		hl				;HL=dest
+ 338+ 8A22
+ 339+ 8A22 50           	ld		d, b
+ 340+ 8A23 59           	ld		e, c
+ 341+ 8A24 06 08        	ld		b, SPAL
+ 342+ 8A26
+ 343+ 8A26              ReadFSBlockLoop:
+ 344+ 8A26 CD F0 8A     	call	ReadDiskSectors
+ 345+ 8A29 B7           	or		a
+ 346+ 8A2A C0           	ret		nz
+ 347+ 8A2B
+ 348+ 8A2B 24           	inc		h				;+256 bytes
+ 349+ 8A2C 14           	inc		d				;+1 sector
+ 350+ 8A2D 10 F7        	djnz	ReadFSBlockLoop
+ 351+ 8A2F
+ 352+ 8A2F C9           	ret
+ 353+ 8A30
+ 354+ 8A30
+ 355+ 8A30              ;Write 8 sectors for an AU
+ 356+ 8A30              ;HL = block number, DE = source buffer
+ 357+ 8A30              WriteFSBlock:
+ 358+ 8A30 D5           	push	de
+ 359+ 8A31 CD 78 89     		call	AU2TS		;B=sector, C=track
+ 360+ 8A34 E1           	pop		hl				;HL=dest
+ 361+ 8A35
+ 362+ 8A35 50           	ld		d, b
+ 363+ 8A36 59           	ld		e, c
+ 364+ 8A37 06 08        	ld		b, SPAL
+ 365+ 8A39
+ 366+ 8A39              WriteFSBlockLoop:
+ 367+ 8A39 CD 03 8B     	call	WriteDiskSectors
+ 368+ 8A3C B7           	or		a
+ 369+ 8A3D C0           	ret		nz
+ 370+ 8A3E
+ 371+ 8A3E 24           	inc		h				;+256 bytes
+ 372+ 8A3F 14           	inc		d				;+1 sector
+ 373+ 8A40 10 F7        	djnz	WriteFSBlockLoop
+ 374+ 8A42
+ 375+ 8A42
+ 376+ 8A42 C9           	ret
+ 377+ 8A43
+ 378+ 8A43              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 379+ 8A43              ;Copies the catalog track and the allocated blocks from one disk to another.
+ 380+ 8A43              CopyDisk:
+ 381+ 8A43              	;Get list of used blocks in current disk, stored in DataBuf, max 632 bytes
+ 382+ 8A43 CD C5 89     	call	ReadUsedBlocksList
+ 383+ 8A46
+ 384+ 8A46 ED 4B C9 B2  	ld		bc, (DataBuf)		;block count, max 318
+ 385+ 8A4A 78           	ld		a, b
+ 386+ 8A4B B1           	or		c
+ 387+ 8A4C C8           	ret		z
+ 388+ 8A4D
+ 389+ 8A4D DD 21 CB B2  	ld		ix, DataBuf + 2
+ 390+ 8A51 11 41 B5     	ld		de, DataBuf + 632
+ 391+ 8A54
+ 392+ 8A54              CopyDiskLoop:
+ 393+ 8A54 C5           	push	bc
+ 394+ 8A55 D5           	push	de
+ 395+ 8A56
+ 396+ 8A56 69           	ld		l, c
+ 397+ 8A57 60           	ld		h, b
+ 398+ 8A58 11 64 92     	ld		de, MsgBlocksLeft
+ 399+ 8A5B CD D2 88     	call	Byte2Txt
+ 400+ 8A5E 21 64 92     	ld		hl, MsgBlocksLeft
+ 401+ 8A61 11 00 0E     	ld		de, LST_LINE_MSG + 1 << 8
+ 402+ 8A64 3E 8F        	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 403+ 8A66 CD 68 87     	call	PrintStrClr
+ 404+ 8A69
+ 405+ 8A69 D1           	pop		de
+ 406+ 8A6A C1           	pop		bc
+ 407+ 8A6B C5           	push	bc
+ 408+ 8A6C D5           	push	de
+ 409+ 8A6D
+ 410+ 8A6D DD 6E 00     		ld		l, (ix)
+ 411+ 8A70 DD 66 01     		ld		h, (ix+1)
+ 412+ 8A73 CD 1D 8A     		call	ReadFSBlock			;Stop on error?
+ 413+ 8A76
+ 414+ 8A76 D1           	pop		de
+ 415+ 8A77 D5           	push	de
+ 416+ 8A78              		;alternate drive
+ 417+ 8A78 3A C6 8B     		ld		a, (RWTSDrive)
+ 418+ 8A7B EE 03        		xor		%11
+ 419+ 8A7D 32 C6 8B     		ld		(RWTSDrive), a
+ 420+ 8A80
+ 421+ 8A80 DD 6E 00     		ld		l, (ix)
+ 422+ 8A83 DD 66 01     		ld		h, (ix+1)
+ 423+ 8A86 CD 30 8A     		call	WriteFSBlock		;Stop on error?
+ 424+ 8A89
+ 425+ 8A89              		;alternate drive
+ 426+ 8A89 3A C6 8B     		ld		a, (RWTSDrive)
+ 427+ 8A8C EE 03        		xor		%11
+ 428+ 8A8E 32 C6 8B     		ld		(RWTSDrive), a
+ 429+ 8A91 D1           	pop		de
+ 430+ 8A92 C1           	pop		bc
+ 431+ 8A93 DD 23        	inc		ix
+ 432+ 8A95 DD 23        	inc		ix
+ 433+ 8A97
+ 434+ 8A97 0B           	dec		bc
+ 435+ 8A98 78           	ld		a, b
+ 436+ 8A99 B1           	or		c
+ 437+ 8A9A 20 B8        	jr		nz, CopyDiskLoop
+ 438+ 8A9C
+ 439+ 8A9C C9           	ret
+ 440+ 8A9D
+ 441+ 8A9D              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 442+ 8A9D
+ 443+ 8A9D              ;Compare string at HL with the one at DE, max length B
+ 444+ 8A9D              ;IN: HL, DE = addr. of strings to compare, B = max. length of strings to compare
+ 445+ 8A9D              ;OUT: z flag, set = match, reset = mismatch
+ 446+ 8A9D              StrCmp:
+ 447+ 8A9D E5           	push hl
+ 448+ 8A9E D5           	push de
+ 449+ 8A9F              Compare:
+ 450+ 8A9F 1A           		ld a, (de)
+ 451+ 8AA0 BE           		cp (hl)
+ 452+ 8AA1 20 04        		jr nz, MisMatch
+ 453+ 8AA3 23           		inc hl
+ 454+ 8AA4 13           		inc de
+ 455+ 8AA5 10 F8        		djnz Compare
+ 456+ 8AA7              MisMatch:
+ 457+ 8AA7 D1           	pop de
+ 458+ 8AA8 E1           	pop hl
+ 459+ 8AA9 C9           	ret
+ 460+ 8AAA
+ 461+ 8AAA              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 462+ 8AAA
+ 463+ 8AAA              ;Read a file into a buffer, sector by sector
+ 464+ 8AAA              ;In: HL = Name address, DE = buffer
+ 465+ 8AAA              FileLoad:
+ 466+ 8AAA D5           	push	de
+ 467+ 8AAB 22 DC 5C     		ld (FSTR1), hl
+ 468+ 8AAE 26 00        		ld h, 0
+ 469+ 8AB0 3A C6 8B     		ld a, (RWTSDrive)
+ 470+ 8AB3 3C           		inc  a			;CP/M drive number to BASIC drive number
+ 471+ 8AB4 6F           		ld	l, a
+ 472+ 8AB5 22 D6 5C     		ld (DSTR1), hl
+ 473+ 8AB8 2E 0B        		ld l,NAMELEN
+ 474+ 8ABA 22 DA 5C     		ld (NSTR1), hl
+ 475+ 8ABD CF           		rst 08
+ 476+ 8ABE 33           		DEFB 51			;open disk channel
+ 477+ 8ABF
+ 478+ 8ABF CF           		rst		8
+ 479+ 8AC0 35           		defb	53		;read sector
+ 480+ 8AC1 D1           	pop		de
+ 481+ 8AC2 30 27        	jr		nc, FileFree
+ 482+ 8AC4
+ 483+ 8AC4 DD 7E 32     	ld		a, (ix + CH_DATA)
+ 484+ 8AC7 FE 04        	cp		TEXT_TYPE
+ 485+ 8AC9 30 12        	jr		nc, FileLoadNoHeader
+ 486+ 8ACB
+ 487+ 8ACB              FileLoadHeader:
+ 488+ 8ACB DD E5        	push	ix
+ 489+ 8ACD E1           	pop		hl
+ 490+ 8ACE 01 3B 00     	ld		bc, CH_DATA + HDR_SZ
+ 491+ 8AD1 09           	add		hl, bc
+ 492+ 8AD2 01 F7 00     	ld		bc, SECT_SZ - HDR_SZ
+ 493+ 8AD5 ED B0        	ldir
+ 494+ 8AD7
+ 495+ 8AD7              FileReadLoop:
+ 496+ 8AD7 D5           	push	de
+ 497+ 8AD8 CF           		rst		8
+ 498+ 8AD9 35           		defb	53		;read sector
+ 499+ 8ADA D1           	pop		de
+ 500+ 8ADB 30 0E        	jr		nc, FileFree
+ 501+ 8ADD
+ 502+ 8ADD              FileLoadNoHeader:
+ 503+ 8ADD DD E5        	push	ix
+ 504+ 8ADF E1           	pop		hl
+ 505+ 8AE0 01 32 00     	ld		bc, CH_DATA
+ 506+ 8AE3 09           	add		hl, bc
+ 507+ 8AE4 01 00 01     	ld		bc, SECT_SZ
+ 508+ 8AE7 ED B0        	ldir
+ 509+ 8AE9 18 EC        	jr		FileReadLoop
+ 510+ 8AEB              ;Copy routine without FileFree as it messes the buffers, probably moves up variables.
+ 511+ 8AEB              FileLoadEnd:
+ 512+ 8AEB
+ 513+ 8AEB              FileFree:
+ 514+ 8AEB D5           	push	de
+ 515+ 8AEC CF           	rst		8
+ 516+ 8AED 38           	defb	56			;close channel (52) or detroy channel (56)
+ 517+ 8AEE D1           	pop		de
+ 518+ 8AEF C9           	ret
+ 519+ 8AF0
+ 520+ 8AF0
+ 521+ 8AF0              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 522+ 8AF0              ;HL = destination buffer, B = count of sectors, DE = track/sector
+ 523+ 8AF0              ;Out: A = error code, 0=OK
+ 524+ 8AF0              ReadDiskSectors:
+ 525+ 8AF0 C5           	push bc
+ 526+ 8AF1 E5           		push hl
+ 527+ 8AF2 D5           			push de
+ 528+ 8AF3 CD 51 89     				call ReadOneDiskSector
+ 529+ 8AF6 D1           			pop de
+ 530+ 8AF7 E1           		pop hl
+ 531+ 8AF8
+ 532+ 8AF8 14           		inc d
+ 533+ 8AF9 24           		inc h
+ 534+ 8AFA C1           	pop bc
+ 535+ 8AFB
+ 536+ 8AFB 3A D1 8B     	ld	a, (RWTSRes)
+ 537+ 8AFE B7           	or	a
+ 538+ 8AFF C0           	ret nz
+ 539+ 8B00
+ 540+ 8B00 10 EE        	djnz ReadDiskSectors
+ 541+ 8B02 C9           	ret
+ 542+ 8B03
+ 543+ 8B03              ;HL = source buffer, B = count of sectors, DE = track/sector
+ 544+ 8B03              ;Out: A = error code, 0=OK
+ 545+ 8B03              WriteDiskSectors:
+ 546+ 8B03 C5           	push bc
+ 547+ 8B04 E5           		push hl
+ 548+ 8B05 D5           			push de
+ 549+ 8B06 CD 5C 89     				call WriteOneDiskSector
+ 550+ 8B09 D1           			pop de
+ 551+ 8B0A E1           		pop hl
+ 552+ 8B0B
+ 553+ 8B0B 14           		inc d
+ 554+ 8B0C 24           		inc h
+ 555+ 8B0D C1           	pop bc
+ 556+ 8B0E
+ 557+ 8B0E 3A D1 8B     	ld	a, (RWTSRes)
+ 558+ 8B11 B7           	or	a
+ 559+ 8B12 C0           	ret nz
+ 560+ 8B13
+ 561+ 8B13 10 EE        	djnz WriteDiskSectors
+ 562+ 8B15 C9           	ret
+ 563+ 8B16
+ 564+ 8B16
+ 565+ 8B16              ;Reads disk catalog
+ 566+ 8B16              ReadCatalogTrack:
+ 567+ 8B16 21 FD 9E     	ld hl, TrackBuf
+ 568+ 8B19 11 00 00     	ld de, 0
+ 569+ 8B1C 06 10        	ld b, SPT
+ 570+ 8B1E
+ 571+ 8B1E CD F0 8A     	call ReadDiskSectors
+ 572+ 8B21 B7           	or   a
+ 573+ 8B22 C0           	ret  nz
+ 574+ 8B23
+ 575+ 8B23              	;Sync BDOS disk, to avoid disk R/O error on disk change
+ 576+ 8B23 F5           	push  af
+ 577+ 8B24 3A C6 8B     		ld  a, (RWTSDrive)
+ 578+ 8B27 CD DB 8B     		call BDOSSelectDisk
+ 579+ 8B2A CD D8 8B     		call BDOSInit
+ 580+ 8B2D F1           	pop   af
+ 581+ 8B2E C9           	ret
+ 582+ 8B2F
+ 583+ 8B2F
+ 584+ 8B2F
+ 585+ 8B2F              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 586+ 8B2F
+ 587+ 8B2F              ;IN: DE = file name to search in cache, HL = file cache table, C = item count
+ 588+ 8B2F              FindCache:
+ 589+ 8B2F 06 0B        	ld		b, NAMELEN
+ 590+ 8B31 CD 9D 8A     	call	StrCmp			;find the file to wich this extension belongs
+ 591+ 8B34 C8           	ret		z
+ 592+ 8B35
+ 593+ 8B35 0D           	dec		c
+ 594+ 8B36 20 02        	jr		nz, CacheNotFinished
+ 595+ 8B38 B1           	or		c
+ 596+ 8B39 C9           	ret
+ 597+ 8B3A
+ 598+ 8B3A              CacheNotFinished:
+ 599+ 8B3A 01 19 00     	ld		bc, CACHE_SZ
+ 600+ 8B3D 09           	add		hl, bc			;to the next cache line
+ 601+ 8B3E 18 EF        	jr		FindCache
+ 602+ 8B40
+ 603+ 8B40              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 604+ 8B40
+ 605+ 8B40              	;ld		ix, (SelFileCache)
+ 606+ 8B40              ReadFileHeader:
+ 607+ 8B40 DD 7E 0F     	ld		a, (ix + CACHE_FLAG)
+ 608+ 8B43 B7           	or		a
+ 609+ 8B44 C0           	ret		nz				;return if already read
+ 610+ 8B45
+ 611+ 8B45 DD 6E 0B     	ld		l, (ix + CACHE_FIRST_AU)
+ 612+ 8B48 DD 66 0C     	ld		h, (ix + CACHE_FIRST_AU + 1)
+ 613+ 8B4B 7C           	ld		a, h
+ 614+ 8B4C B5           	or		l
+ 615+ 8B4D 28 1F        	jr		z, ReadHeaderEnd
+ 616+ 8B4F CD 78 89     	call	AU2TS
+ 617+ 8B52 50           	ld		d, b
+ 618+ 8B53 59           	ld		e, c
+ 619+ 8B54 21 C9 B2     	ld		hl, DataBuf
+ 620+ 8B57 DD E5        	push	ix
+ 621+ 8B59 DD E5        	push	ix
+ 622+ 8B5B CD 51 89     		call	ReadOneDiskSector
+ 623+ 8B5E E1           	pop		hl
+ 624+ 8B5F DD E1        	pop		ix
+ 625+ 8B61 01 10 00     	ld		bc, CACHE_HDR
+ 626+ 8B64 09           	add		hl, bc
+ 627+ 8B65 EB           	ex		hl, de
+ 628+ 8B66 21 C9 B2     	ld		hl, DataBuf
+ 629+ 8B69 01 09 00     	ld		bc, HDR_SZ
+ 630+ 8B6C ED B0        	ldir
+ 631+ 8B6E              ReadHeaderEnd:
+ 632+ 8B6E DD 34 0F     	inc		(ix + CACHE_FLAG)
+ 633+ 8B71 C9           	ret
+ 634+ 8B72
+ 635+ 8B72              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 636+ 8B72
+ 637+ 8B72              ;IN: HL = address from IF1 to call
+ 638+ 8B72              IF1Call:
+ 639+ 8B72 22 ED 5C     	LD   (HD11), HL
+ 640+ 8B75 CF           	RST  8
+ 641+ 8B76 32           	DEFB 50
+ 642+ 8B77 C9           	RET
+ 643+ 8B78
+ 644+ 8B78              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 645+ 8B78
+ 646+ 8B78              ;Load a program from disk
+ 647+ 8B78              ;IN: HL = file name addr
+ 648+ 8B78              LoadProgram:
+ 649+ 8B78 22 DC 5C     	LD   (FSTR1), HL
+ 650+ 8B7B 26 00        	LD   H, 0
+ 651+ 8B7D 2E 0B        	LD   L, NAMELEN
+ 652+ 8B7F 22 DA 5C     	LD   (NSTR1), HL
+ 653+ 8B82 3A C6 8B     	LD	 A, (RWTSDrive)
+ 654+ 8B85 3C           	INC  A					;Adapt for BASIC drive number
+ 655+ 8B86 6F           	LD   L, A
+ 656+ 8B87 22 D6 5C     	LD   (DSTR1), HL
+ 657+ 8B8A 21 41 0A     	LD   HL, LOAD_ADDR
+ 658+ 8B8D CD 72 8B     	CALL IF1Call
+ 659+ 8B90 C9           	RET
+ 660+ 8B91
+ 661+ 8B91              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 662+ 8B91
+ 663+ 8B91              SetFastKeys:
+ 664+ 8B91 21 09 5C     	ld		hl, REPDEL
+ 665+ 8B94 11 0F 01     	ld		de, (1 << 8) | 15
+ 666+ 8B97 73 23 72 2B  	ld		(hl), de
+ 667+ 8B9B
+ 668+ 8B9B C9           	ret
+ 669+ 8B9C
+ 670+ 8B9C
+ 671+ 8B9C              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 672+ 8B9C              GetErrMsg:
+ 673+ 8B9C 3C           	inc		a
+ 674+ 8B9D 08           	ex		af, af'
+ 675+ 8B9E
+ 676+ 8B9E 21 A7 8B     	ld		hl, IF1Paged			;page-in IF1
+ 677+ 8BA1 22 ED 5C     	ld		(HD11), hl
+ 678+ 8BA4 CF           	rst		8
+ 679+ 8BA5 32           	defb	50
+ 680+ 8BA6 C9           	ret								;return after accesing IF1
+ 681+ 8BA7
+ 682+ 8BA7              IF1Paged:
+ 683+ 8BA7 21 60 02     	ld		hl, ERRMSG
+ 684+ 8BAA 08           	ex		af, af'
+ 685+ 8BAB B7           	or		a
+ 686+ 8BAC 28 0B        	jr		z, SaveMsg
+ 687+ 8BAE
+ 688+ 8BAE 06 00        	ld		b, 0
+ 689+ 8BB0              SearchMsgEnd:
+ 690+ 8BB0 CB 7E        	bit		7, (hl)
+ 691+ 8BB2 23           	inc		hl
+ 692+ 8BB3 28 FB        	jr		z, SearchMsgEnd
+ 693+ 8BB5
+ 694+ 8BB5 04           	inc		b
+ 695+ 8BB6 B8           	cp		b
+ 696+ 8BB7 20 F7        	jr		nz, SearchMsgEnd
+ 697+ 8BB9
+ 698+ 8BB9              SaveMsg:
+ 699+ 8BB9 11 C9 B2     	ld		de, DataBuf
+ 700+ 8BBC              CopyMsg:
+ 701+ 8BBC 7E           	ld		a, (hl)
+ 702+ 8BBD CB 7F        	bit		7, a
+ 703+ 8BBF 12           	ld		(de), a
+ 704+ 8BC0 23           	inc		hl
+ 705+ 8BC1 13           	inc		de
+ 706+ 8BC2 28 F8        	jr		z, CopyMsg
+ 707+ 8BC4
+ 708+ 8BC4 C9           	ret
+ 709+ 8BC5
+ 710+ 8BC5              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 711+ 8BC5
+ 712+ 8BC5              ;RWTS routine I/O block
+ 713+ 8BC5              RWTSParams:
+ 714+ 8BC5 01           RWTSBlockType	DEFB	1
+ 715+ 8BC6 00           RWTSDrive		DEFB	DRIVE_A_CPM					;NOT like BASIC (0,1,2), just 0,1.
+ 716+ 8BC7 00           RWTSVolNo		DEFB	0
+ 717+ 8BC8 00           RWTSTrack		DEFB	0
+ 718+ 8BC9 00           RWTSSector		DEFB	0
+ 719+ 8BCA 00 00        RWTSDMA			DEFW	0
+ 720+ 8BCC 32 29        RWTSExtBuf		DEFW	$2932
+ 721+ 8BCE 2A 1F        RWTSPrmTbl		DEFW	$1f2a
+ 722+ 8BD0 01           RWTSCmd			DEFB	RWTS_CMD_READ
+ 723+ 8BD1              ;Results
+ 724+ 8BD1 00           RWTSRes			DEFB	0
+ 725+ 8BD2 00           RWTSResVolNo	DEFB	0
+ 726+ 8BD3 00 00 00 00  RWTSResTmp		DEFB	0, 0, 0, 0, 0
+ 726+ 8BD7 00
+ 727+ 8BD8
+ 728+ 8BD8              ;Param. table, found in ROM, cannot be overriden, it seems the IF1 routine always uses the constants from ROM.
+ 729+ 8BD8 ~            /*
+ 730+ 8BD8 ~            BasPrmTbl:
+ 731+ 8BD8 ~            PrmDevType		DEFB	$01			;$01
+ 732+ 8BD8 ~            PrmStepRate		DEFB	$06;$09		;$0D	(milisec)
+ 733+ 8BD8 ~            PrmHeadLoad		DEFB	$10;$16		;$23	(milisec)
+ 734+ 8BD8 ~            PrmSpinUp		DEFB	$20;$50		;$64	(1/100 sec)
+ 735+ 8BD8 ~            PrmIntrlvTbl	DEFW	InterleaveTbl
+ 736+ 8BD8 ~            InterleaveTbl   DEFB	1, 3, 5, 7, 9, 11, 13, 15, 2, 4, 6, 8, 10, 12, 14, 16
+ 737+ 8BD8 ~            */
+ 738+ 8BD8
+ 739+ 8BD8              	endif
+# file closed: disk.asm
+1110  8BD8              	include "bdos.asm"
+# file opened: bdos.asm
+   1+ 8BD8              ;BDOS functions - similar to CP/M
+   2+ 8BD8
+   3+ 8BD8              ;Error codes returned by BDOS/CP/M, taken from https://www.seasip.info/Cpm/bdos.html
+   4+ 8BD8              ;0 OK,
+   5+ 8BD8              ;1 directory full,
+   6+ 8BD8              ;2 disc full,
+   7+ 8BD8              ;9 invalid FCB,
+   8+ 8BD8              ;10(CP/M) media changed;
+   9+ 8BD8              ;0FFh hardware error.
+  10+ 8BD8
+  11+ 8BD8
+  12+ 8BD8              	ifndef	_BDOS_
+  13+ 8BD8              	define	_BDOS_
+  14+ 8BD8
+  15+ 8BD8              	include "disk.asm"
+# file opened: disk.asm
+   1++8BD8              ;HC IF1 routines and constants
+   2++8BD8
+   3++8BD8              ;IF1 routines error codes, also returned by BASIC commands
+   4++8BD8              ;12 = Writing to a 'read' file
+   5++8BD8              ;13 = Reading a 'write' file
+   6++8BD8              ;14 = Disk 'write' protected (by hardware, disk notch open)
+   7++8BD8              ;15 = Disk full (disk or catalog full)
+   8++8BD8              ;16 = Disk error (hardware error)
+   9++8BD8              ;17 = File not found
+  10++8BD8              ;23 = Disk R/O (disk change detected, software R/O)
+  11++8BD8              ;24 = File R/O (attempting to delete or copy a file with R/O attribute)
+  12++8BD8
+  13++8BD8              ;Error codes returned by the low level IF1 RWTS routine, from "ABC de calculatoare personale..." book.
+  14++8BD8              ;00h = OK
+  15++8BD8              ;08h = cannot format disk
+  16++8BD8              ;10h = disk protected (read-only?)
+  17++8BD8              ;20h = volume error
+  18++8BD8              ;40h = drive error
+  19++8BD8              ;80h = reading error
+  20++8BD8              ;Codes I encountered:
+  21++8BD8              ;04h = a CP/M disk was inserted instead of a BASIC one
+  22++8BD8
+  23++8BD8
+  24++8BD8              	ifndef	_DISK_
+  25++8BD8 ~            	define	_DISK_
+  26++8BD8 ~
+  27++8BD8 ~            	include	"math.asm"
+  28++8BD8 ~
+  29++8BD8 ~            DRIVE_CUR_BAS	EQU 0
+  30++8BD8 ~            DRIVE_A_BAS		EQU	1
+  31++8BD8 ~            DRIVE_B_BAS		EQU	2
+  32++8BD8 ~            DRIVE_A_CPM		EQU	0
+  33++8BD8 ~            DRIVE_B_CPM		EQU	1
+  34++8BD8 ~            ;Disk geometry stuff
+  35++8BD8 ~            SPT				EQU	16			;sectors per track
+  36++8BD8 ~            SECT_SZ			EQU	256			;sector size in bytes
+  37++8BD8 ~            TRACK_CNT		EQU	80			;track count
+  38++8BD8 ~            HEAD_CNT		EQU	2			;disk face count
+  39++8BD8 ~            AU_SZ			EQU	2048		;allocation unit size in bytes (8 sectors, half of a track)
+  40++8BD8 ~            EXT_SZ			EQU	32			;directory entry size
+  41++8BD8 ~            DIR_TRK_CNT		EQU	1			;tracks rezerved for directory
+  42++8BD8 ~            EXT_AU_CNT		EQU 8			;allocation units in one extension
+  43++8BD8 ~            SPAL			EQU	(AU_SZ/SECT_SZ);sectors per allocation unit
+  44++8BD8 ~            MAX_EXT_CNT		EQU	(SPT * DIR_TRK_CNT * SECT_SZ / EXT_SZ);maximum directory entries
+  45++8BD8 ~            MAX_FREE_AU_CNT		EQU	((TRACK_CNT * HEAD_CNT - DIR_TRK_CNT) * SPT * SECT_SZ)/AU_SZ ;max free allocation units (318)
+  46++8BD8 ~            REC_SZ			EQU 128			;cp/m record size
+  47++8BD8 ~            DEL_MARKER		EQU	$E5
+  48++8BD8 ~            EOF_MARKER		EQU	$1B
+  49++8BD8 ~
+  50++8BD8 ~
+  51++8BD8 ~            ;Extension structure (directory entry)
+  52++8BD8 ~            EXT_DEL_FLAG	EQU	0
+  53++8BD8 ~            EXT_NAME		EQU 1
+  54++8BD8 ~            EXT_IDX			EQU 12
+  55++8BD8 ~            EXT_S1			EQU 13
+  56++8BD8 ~            EXT_S2			EQU 14
+  57++8BD8 ~            EXT_RC			EQU	15
+  58++8BD8 ~            EXT_AU0			EQU	16
+  59++8BD8 ~            EXT_AU1			EQU	18
+  60++8BD8 ~            EXT_AU2			EQU	20
+  61++8BD8 ~            EXT_AU3			EQU	22
+  62++8BD8 ~            EXT_AU4			EQU	24
+  63++8BD8 ~            EXT_AU5			EQU	26
+  64++8BD8 ~            EXT_AU6			EQU	28
+  65++8BD8 ~            EXT_AU7			EQU	30
+  66++8BD8 ~            EXT_SIZE		EQU 32
+  67++8BD8 ~
+  68++8BD8 ~            ;FCB structure
+  69++8BD8 ~            FCB_DRIVE		EQU 0
+  70++8BD8 ~            FCB_NAME		EQU EXT_NAME
+  71++8BD8 ~            FCB_EX_IDX		EQU EXT_IDX
+  72++8BD8 ~            FCB_S1			EQU EXT_S1
+  73++8BD8 ~            FCB_S2			EQU EXT_S2
+  74++8BD8 ~            FCB_RC			EQU	EXT_RC
+  75++8BD8 ~            FCB_AU			EQU	EXT_AU0
+  76++8BD8 ~            FCB_CR			EQU	32
+  77++8BD8 ~            FCB_R0			EQU 33
+  78++8BD8 ~            FCB_R1			EQU 34
+  79++8BD8 ~            FCB_R2			EQU 35
+  80++8BD8 ~            FCB_SIZE		EQU 36
+  81++8BD8 ~
+  82++8BD8 ~
+  83++8BD8 ~
+  84++8BD8 ~            ;System variables for disk
+  85++8BD8 ~            DSTR1			EQU	$5CD6		;drive
+  86++8BD8 ~            FSTR1			EQU	$5CDC		;file name
+  87++8BD8 ~            NSTR1			EQU	$5CDA		;name length
+  88++8BD8 ~            HD11			EQU	$5CED		;BDOS argument
+  89++8BD8 ~            COPIES			EQU	$5CEF		;BDOS function
+  90++8BD8 ~
+  91++8BD8 ~            ERRSP			EQU $5C3D
+  92++8BD8 ~            ERRNR			EQU $5C3A
+  93++8BD8 ~            ERRMSG			EQU	$0260
+  94++8BD8 ~
+  95++8BD8 ~            PRN_BUF			EQU	23296
+  96++8BD8 ~
+  97++8BD8 ~            ;STR_COPYRIGHT	EQU	$1539
+  98++8BD8 ~
+  99++8BD8 ~            REPDEL			EQU	23561
+ 100++8BD8 ~            REPPER			EQU	23562
+ 101++8BD8 ~            PIP				EQU	23609
+ 102++8BD8 ~
+ 103++8BD8 ~
+ 104++8BD8 ~            ;RWTS routine commands
+ 105++8BD8 ~            RWTS_CMD_POS	EQU	0			;position head
+ 106++8BD8 ~            RWTS_CMD_READ	EQU	1			;read sector
+ 107++8BD8 ~            RWTS_CMD_WRITE	EQU	2			;write sector
+ 108++8BD8 ~            RWTS_CMD_FMT	EQU	4			;format all tracks
+ 109++8BD8 ~
+ 110++8BD8 ~
+ 111++8BD8 ~            ;File name stuff
+ 112++8BD8 ~            NAMELEN			EQU	11			;name length
+ 113++8BD8 ~            RO_POS			EQU	8			;read-only attribute position in name
+ 114++8BD8 ~            SYS_POS			EQU	9			;system attribute position in name
+ 115++8BD8 ~
+ 116++8BD8 ~            ;File types (first byte in header)
+ 117++8BD8 ~            PROG_TYPE		EQU	0			;program
+ 118++8BD8 ~            NUMB_TYPE		EQU	1			;number array
+ 119++8BD8 ~            CHAR_TYPE		EQU	2			;char array
+ 120++8BD8 ~            BYTE_TYPE		EQU	3			;bytes
+ 121++8BD8 ~            TEXT_TYPE		EQU	4			;text, >= 4
+ 122++8BD8 ~
+ 123++8BD8 ~            ;File header offsets
+ 124++8BD8 ~            HDR_TYPE		EQU	0
+ 125++8BD8 ~            HDR_LEN			EQU 1
+ 126++8BD8 ~            HDR_ADDR		EQU 3
+ 127++8BD8 ~            HDR_PLEN		EQU	5
+ 128++8BD8 ~            HDR_LINE		EQU 7
+ 129++8BD8 ~            HDR_SZ			EQU	9
+ 130++8BD8 ~
+ 131++8BD8 ~            ;BASIC disk channel structure
+ 132++8BD8 ~            CH_RW_FLAG		EQU 11
+ 133++8BD8 ~            CH_FCB			EQU	12
+ 134++8BD8 ~            CH_DATA			EQU	50
+ 135++8BD8 ~            CH_DMA			EQU CH_DATA - CH_FCB	;offset of DMA from start of FCB
+ 136++8BD8 ~
+ 137++8BD8 ~            CACHE_NAME		EQU	0					;11B
+ 138++8BD8 ~            CACHE_FIRST_AU	EQU	NAMELEN				;2B
+ 139++8BD8 ~            CACHE_AU_CNT	EQU	CACHE_FIRST_AU + 2	;2B
+ 140++8BD8 ~            CACHE_FLAG		EQU CACHE_AU_CNT + 2	;1B
+ 141++8BD8 ~            CACHE_HDR		EQU	CACHE_FLAG + 1		;9B
+ 142++8BD8 ~            CACHE_SZ		EQU	25					;11 + 2 + 2 + 1 + 9
+ 143++8BD8 ~
+ 144++8BD8 ~            LOAD_ADDR		EQU	2625		;address of the load procedure in IF1 ROM
+ 145++8BD8 ~
+ 146++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 147++8BD8 ~            IF1Init:
+ 148++8BD8 ~            	rst		08
+ 149++8BD8 ~            	defb	49		;create system variables
+ 150++8BD8 ~            	ret
+ 151++8BD8 ~
+ 152++8BD8 ~            ;ReadWriteTrackSector
+ 153++8BD8 ~            ;A=command: 0, 1, 2, 4
+ 154++8BD8 ~            RWTS:
+ 155++8BD8 ~            	ld (RWTSCmd), a
+ 156++8BD8 ~            	ld hl, RWTSParams
+ 157++8BD8 ~            	ld (HD11), hl
+ 158++8BD8 ~            	rst 08
+ 159++8BD8 ~            	DEFB 58
+ 160++8BD8 ~            	ret
+ 161++8BD8 ~
+ 162++8BD8 ~
+ 163++8BD8 ~            ;D = sector, E = track
+ 164++8BD8 ~            ;HL = dma
+ 165++8BD8 ~            ReadOneDiskSector:
+ 166++8BD8 ~            	ld (RWTSDMA), hl
+ 167++8BD8 ~            	ld (RWTSTrack), de
+ 168++8BD8 ~            	;ld (RWTSDrive), a
+ 169++8BD8 ~            	ld a, RWTS_CMD_READ
+ 170++8BD8 ~            	jr	RWTS
+ 171++8BD8 ~
+ 172++8BD8 ~            ;D = sector, E = track
+ 173++8BD8 ~            ;HL = dma
+ 174++8BD8 ~            WriteOneDiskSector:
+ 175++8BD8 ~            	ld (RWTSDMA), hl
+ 176++8BD8 ~            	ld (RWTSTrack), de
+ 177++8BD8 ~            	;ld (RWTSDrive), a
+ 178++8BD8 ~            	ld a, RWTS_CMD_WRITE
+ 179++8BD8 ~            	jr	RWTS
+ 180++8BD8 ~
+ 181++8BD8 ~            FormatDisk:
+ 182++8BD8 ~            	ld		hl, DataBuf
+ 183++8BD8 ~            	ld		(hl), DEL_MARKER
+ 184++8BD8 ~            	ld 		(RWTSDMA), hl
+ 185++8BD8 ~            	ld 		a, RWTS_CMD_FMT
+ 186++8BD8 ~            	call	RWTS
+ 187++8BD8 ~            	ld		a, (RWTSRes)
+ 188++8BD8 ~            	ret
+ 189++8BD8 ~
+ 190++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 191++8BD8 ~
+ 192++8BD8 ~            ;Allocation unit no. to track/sector
+ 193++8BD8 ~            ;Formula: T=(AllocUnit*SPAL)/SPT; Sect=T mod SPT; Track=T/2 (2 disk faces); Head=T mod 2
+ 194++8BD8 ~            ;IN:  HL=alloc. unit no.
+ 195++8BD8 ~            ;OUT: B=sector; C=track (head is determined by the sector number)
+ 196++8BD8 ~            AU2TS:
+ 197++8BD8 ~            	ld c, SPT/SPAL
+ 198++8BD8 ~            	call Div					;A = sector
+ 199++8BD8 ~            	push af
+ 200++8BD8 ~            		/*
+ 201++8BD8 ~            		ld c, HEAD_CNT
+ 202++8BD8 ~            		call Div				;L = track, A = head (0 or 1)
+ 203++8BD8 ~            		*/
+ 204++8BD8 ~            		xor a
+ 205++8BD8 ~            		rr h
+ 206++8BD8 ~            		rr l
+ 207++8BD8 ~            		rr a
+ 208++8BD8 ~
+ 209++8BD8 ~            		ld c, l
+ 210++8BD8 ~            		ld b, 0
+ 211++8BD8 ~            		or a
+ 212++8BD8 ~            		jr z, Track0
+ 213++8BD8 ~            		ld b, SPT
+ 214++8BD8 ~            Track0:
+ 215++8BD8 ~            	pop af
+ 216++8BD8 ~            	or a
+ 217++8BD8 ~            	jr z, FirstAU
+ 218++8BD8 ~            	ld a, SPAL
+ 219++8BD8 ~            FirstAU:
+ 220++8BD8 ~            	add a, b
+ 221++8BD8 ~            	ld  b, a
+ 222++8BD8 ~            	ret
+ 223++8BD8 ~
+ 224++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 225++8BD8 ~
+ 226++8BD8 ~            ;Checks the allocation units number used in extension
+ 227++8BD8 ~            ;IN:	IX = extension addr
+ 228++8BD8 ~            ;OUT:	B = no. of allocation units used
+ 229++8BD8 ~            ;		C = no. of records used in ext.
+ 230++8BD8 ~            ;		HL = first alloc. unit no.
+ 231++8BD8 ~            ;		DE = last alloc. unit no.
+ 232++8BD8 ~            CheckExtAlloc:
+ 233++8BD8 ~            	push ix
+ 234++8BD8 ~            		ld bc, EXT_RC
+ 235++8BD8 ~            		add ix, bc
+ 236++8BD8 ~            		ld c, (ix)			;save rec. no.
+ 237++8BD8 ~            		inc ix
+ 238++8BD8 ~            		ld l, (ix)
+ 239++8BD8 ~            		ld h, (ix + 1)
+ 240++8BD8 ~            		ld b, EXT_AU_CNT
+ 241++8BD8 ~            CheckAU:
+ 242++8BD8 ~            		ld a, (ix)
+ 243++8BD8 ~            		or (ix + 1)
+ 244++8BD8 ~            		jr z, CheckAUEnd
+ 245++8BD8 ~            		ld e, (ix)
+ 246++8BD8 ~            		ld d, (ix + 1)
+ 247++8BD8 ~            		inc ix
+ 248++8BD8 ~            		inc ix
+ 249++8BD8 ~            		djnz CheckAU
+ 250++8BD8 ~            CheckAUEnd:
+ 251++8BD8 ~            		ld a, EXT_AU_CNT
+ 252++8BD8 ~            		sub b
+ 253++8BD8 ~            		ld b, a
+ 254++8BD8 ~            	pop ix
+ 255++8BD8 ~            	ret
+ 256++8BD8 ~
+ 257++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 258++8BD8 ~
+ 259++8BD8 ~            ;Input: TrackBuffer
+ 260++8BD8 ~            ;Output: DataBuf = used block count (2 bytes), used block numbers (2 bytes each)
+ 261++8BD8 ~            ReadUsedBlocksList:
+ 262++8BD8 ~            	ld		ix, TrackBuf			;source buffer
+ 263++8BD8 ~            	ld		hl, DataBuf 			;destination buffer
+ 264++8BD8 ~            	ld		bc, MAX_FREE_AU_CNT		;loop counter
+ 265++8BD8 ~            	ld		de, 2					;counter of used blocks, start with 2
+ 266++8BD8 ~            	ld		(hl), e
+ 267++8BD8 ~            	inc		hl
+ 268++8BD8 ~            	ld		(hl), d
+ 269++8BD8 ~            	inc		hl
+ 270++8BD8 ~
+ 271++8BD8 ~            	;Add blocks 0 and 1 for directory
+ 272++8BD8 ~            	ld		de, 0
+ 273++8BD8 ~            	ld		(hl), e
+ 274++8BD8 ~            	inc		hl
+ 275++8BD8 ~            	ld		(hl), d
+ 276++8BD8 ~            	inc		hl
+ 277++8BD8 ~
+ 278++8BD8 ~            	inc		de
+ 279++8BD8 ~            	ld		(hl), e
+ 280++8BD8 ~            	inc		hl
+ 281++8BD8 ~            	ld		(hl), d
+ 282++8BD8 ~            	inc		hl
+ 283++8BD8 ~
+ 284++8BD8 ~            ReadUsedBlocksLoop:
+ 285++8BD8 ~            	xor		a
+ 286++8BD8 ~            	cp		(ix)
+ 287++8BD8 ~            	jr		nz, ReadUsedBlocksSkip2;skip dir entry because it's not valid
+ 288++8BD8 ~
+ 289++8BD8 ~            	push	ix
+ 290++8BD8 ~            	push	bc
+ 291++8BD8 ~            		ld		b, EXT_AU_CNT
+ 292++8BD8 ~            		ld		de, EXT_AU0
+ 293++8BD8 ~            		add		ix, de
+ 294++8BD8 ~
+ 295++8BD8 ~            ReadUsedBlocksLoop2:
+ 296++8BD8 ~            		ld		e, (ix)
+ 297++8BD8 ~            		ld		d, (ix+1)
+ 298++8BD8 ~            		ld		a, e
+ 299++8BD8 ~            		or		d
+ 300++8BD8 ~            		jr		z, ReadUsedBlocksSkip;end dir entry reading when the AU number is 0
+ 301++8BD8 ~
+ 302++8BD8 ~            		ld		(hl), e
+ 303++8BD8 ~            		inc		hl
+ 304++8BD8 ~            		ld		(hl), d
+ 305++8BD8 ~            		inc		hl
+ 306++8BD8 ~
+ 307++8BD8 ~            		inc		ix
+ 308++8BD8 ~            		inc		ix
+ 309++8BD8 ~
+ 310++8BD8 ~            		ld		de, (DataBuf)
+ 311++8BD8 ~            		inc		de
+ 312++8BD8 ~            		ld		(DataBuf), de
+ 313++8BD8 ~
+ 314++8BD8 ~            		djnz	ReadUsedBlocksLoop2
+ 315++8BD8 ~
+ 316++8BD8 ~
+ 317++8BD8 ~            ReadUsedBlocksSkip:
+ 318++8BD8 ~            	pop		bc
+ 319++8BD8 ~            	pop		ix
+ 320++8BD8 ~            ReadUsedBlocksSkip2:
+ 321++8BD8 ~            	ld		de, EXT_SZ
+ 322++8BD8 ~            	add		ix, de
+ 323++8BD8 ~
+ 324++8BD8 ~            	dec		bc
+ 325++8BD8 ~            	ld		a, b
+ 326++8BD8 ~            	or		c
+ 327++8BD8 ~            	jr		nz, ReadUsedBlocksLoop
+ 328++8BD8 ~
+ 329++8BD8 ~            	ret
+ 330++8BD8 ~
+ 331++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 332++8BD8 ~            ;Reads 8 sectors for an AU
+ 333++8BD8 ~            ;HL = block number, DE = destination buffer
+ 334++8BD8 ~            ReadFSBlock:
+ 335++8BD8 ~            	push	de
+ 336++8BD8 ~            		call	AU2TS		;B=sector, C=track
+ 337++8BD8 ~            	pop		hl				;HL=dest
+ 338++8BD8 ~
+ 339++8BD8 ~            	ld		d, b
+ 340++8BD8 ~            	ld		e, c
+ 341++8BD8 ~            	ld		b, SPAL
+ 342++8BD8 ~
+ 343++8BD8 ~            ReadFSBlockLoop:
+ 344++8BD8 ~            	call	ReadDiskSectors
+ 345++8BD8 ~            	or		a
+ 346++8BD8 ~            	ret		nz
+ 347++8BD8 ~
+ 348++8BD8 ~            	inc		h				;+256 bytes
+ 349++8BD8 ~            	inc		d				;+1 sector
+ 350++8BD8 ~            	djnz	ReadFSBlockLoop
+ 351++8BD8 ~
+ 352++8BD8 ~            	ret
+ 353++8BD8 ~
+ 354++8BD8 ~
+ 355++8BD8 ~            ;Write 8 sectors for an AU
+ 356++8BD8 ~            ;HL = block number, DE = source buffer
+ 357++8BD8 ~            WriteFSBlock:
+ 358++8BD8 ~            	push	de
+ 359++8BD8 ~            		call	AU2TS		;B=sector, C=track
+ 360++8BD8 ~            	pop		hl				;HL=dest
+ 361++8BD8 ~
+ 362++8BD8 ~            	ld		d, b
+ 363++8BD8 ~            	ld		e, c
+ 364++8BD8 ~            	ld		b, SPAL
+ 365++8BD8 ~
+ 366++8BD8 ~            WriteFSBlockLoop:
+ 367++8BD8 ~            	call	WriteDiskSectors
+ 368++8BD8 ~            	or		a
+ 369++8BD8 ~            	ret		nz
+ 370++8BD8 ~
+ 371++8BD8 ~            	inc		h				;+256 bytes
+ 372++8BD8 ~            	inc		d				;+1 sector
+ 373++8BD8 ~            	djnz	WriteFSBlockLoop
+ 374++8BD8 ~
+ 375++8BD8 ~
+ 376++8BD8 ~            	ret
+ 377++8BD8 ~
+ 378++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 379++8BD8 ~            ;Copies the catalog track and the allocated blocks from one disk to another.
+ 380++8BD8 ~            CopyDisk:
+ 381++8BD8 ~            	;Get list of used blocks in current disk, stored in DataBuf, max 632 bytes
+ 382++8BD8 ~            	call	ReadUsedBlocksList
+ 383++8BD8 ~
+ 384++8BD8 ~            	ld		bc, (DataBuf)		;block count, max 318
+ 385++8BD8 ~            	ld		a, b
+ 386++8BD8 ~            	or		c
+ 387++8BD8 ~            	ret		z
+ 388++8BD8 ~
+ 389++8BD8 ~            	ld		ix, DataBuf + 2
+ 390++8BD8 ~            	ld		de, DataBuf + 632
+ 391++8BD8 ~
+ 392++8BD8 ~            CopyDiskLoop:
+ 393++8BD8 ~            	push	bc
+ 394++8BD8 ~            	push	de
+ 395++8BD8 ~
+ 396++8BD8 ~            	ld		l, c
+ 397++8BD8 ~            	ld		h, b
+ 398++8BD8 ~            	ld		de, MsgBlocksLeft
+ 399++8BD8 ~            	call	Byte2Txt
+ 400++8BD8 ~            	ld		hl, MsgBlocksLeft
+ 401++8BD8 ~            	ld		de, LST_LINE_MSG + 1 << 8
+ 402++8BD8 ~            	ld		a, SCR_DEF_CLR | CLR_FLASH
+ 403++8BD8 ~            	call	PrintStrClr
+ 404++8BD8 ~
+ 405++8BD8 ~            	pop		de
+ 406++8BD8 ~            	pop		bc
+ 407++8BD8 ~            	push	bc
+ 408++8BD8 ~            	push	de
+ 409++8BD8 ~
+ 410++8BD8 ~            		ld		l, (ix)
+ 411++8BD8 ~            		ld		h, (ix+1)
+ 412++8BD8 ~            		call	ReadFSBlock			;Stop on error?
+ 413++8BD8 ~
+ 414++8BD8 ~            	pop		de
+ 415++8BD8 ~            	push	de
+ 416++8BD8 ~            		;alternate drive
+ 417++8BD8 ~            		ld		a, (RWTSDrive)
+ 418++8BD8 ~            		xor		%11
+ 419++8BD8 ~            		ld		(RWTSDrive), a
+ 420++8BD8 ~
+ 421++8BD8 ~            		ld		l, (ix)
+ 422++8BD8 ~            		ld		h, (ix+1)
+ 423++8BD8 ~            		call	WriteFSBlock		;Stop on error?
+ 424++8BD8 ~
+ 425++8BD8 ~            		;alternate drive
+ 426++8BD8 ~            		ld		a, (RWTSDrive)
+ 427++8BD8 ~            		xor		%11
+ 428++8BD8 ~            		ld		(RWTSDrive), a
+ 429++8BD8 ~            	pop		de
+ 430++8BD8 ~            	pop		bc
+ 431++8BD8 ~            	inc		ix
+ 432++8BD8 ~            	inc		ix
+ 433++8BD8 ~
+ 434++8BD8 ~            	dec		bc
+ 435++8BD8 ~            	ld		a, b
+ 436++8BD8 ~            	or		c
+ 437++8BD8 ~            	jr		nz, CopyDiskLoop
+ 438++8BD8 ~
+ 439++8BD8 ~            	ret
+ 440++8BD8 ~
+ 441++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 442++8BD8 ~
+ 443++8BD8 ~            ;Compare string at HL with the one at DE, max length B
+ 444++8BD8 ~            ;IN: HL, DE = addr. of strings to compare, B = max. length of strings to compare
+ 445++8BD8 ~            ;OUT: z flag, set = match, reset = mismatch
+ 446++8BD8 ~            StrCmp:
+ 447++8BD8 ~            	push hl
+ 448++8BD8 ~            	push de
+ 449++8BD8 ~            Compare:
+ 450++8BD8 ~            		ld a, (de)
+ 451++8BD8 ~            		cp (hl)
+ 452++8BD8 ~            		jr nz, MisMatch
+ 453++8BD8 ~            		inc hl
+ 454++8BD8 ~            		inc de
+ 455++8BD8 ~            		djnz Compare
+ 456++8BD8 ~            MisMatch:
+ 457++8BD8 ~            	pop de
+ 458++8BD8 ~            	pop hl
+ 459++8BD8 ~            	ret
+ 460++8BD8 ~
+ 461++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 462++8BD8 ~
+ 463++8BD8 ~            ;Read a file into a buffer, sector by sector
+ 464++8BD8 ~            ;In: HL = Name address, DE = buffer
+ 465++8BD8 ~            FileLoad:
+ 466++8BD8 ~            	push	de
+ 467++8BD8 ~            		ld (FSTR1), hl
+ 468++8BD8 ~            		ld h, 0
+ 469++8BD8 ~            		ld a, (RWTSDrive)
+ 470++8BD8 ~            		inc  a			;CP/M drive number to BASIC drive number
+ 471++8BD8 ~            		ld	l, a
+ 472++8BD8 ~            		ld (DSTR1), hl
+ 473++8BD8 ~            		ld l,NAMELEN
+ 474++8BD8 ~            		ld (NSTR1), hl
+ 475++8BD8 ~            		rst 08
+ 476++8BD8 ~            		DEFB 51			;open disk channel
+ 477++8BD8 ~
+ 478++8BD8 ~            		rst		8
+ 479++8BD8 ~            		defb	53		;read sector
+ 480++8BD8 ~            	pop		de
+ 481++8BD8 ~            	jr		nc, FileFree
+ 482++8BD8 ~
+ 483++8BD8 ~            	ld		a, (ix + CH_DATA)
+ 484++8BD8 ~            	cp		TEXT_TYPE
+ 485++8BD8 ~            	jr		nc, FileLoadNoHeader
+ 486++8BD8 ~
+ 487++8BD8 ~            FileLoadHeader:
+ 488++8BD8 ~            	push	ix
+ 489++8BD8 ~            	pop		hl
+ 490++8BD8 ~            	ld		bc, CH_DATA + HDR_SZ
+ 491++8BD8 ~            	add		hl, bc
+ 492++8BD8 ~            	ld		bc, SECT_SZ - HDR_SZ
+ 493++8BD8 ~            	ldir
+ 494++8BD8 ~
+ 495++8BD8 ~            FileReadLoop:
+ 496++8BD8 ~            	push	de
+ 497++8BD8 ~            		rst		8
+ 498++8BD8 ~            		defb	53		;read sector
+ 499++8BD8 ~            	pop		de
+ 500++8BD8 ~            	jr		nc, FileFree
+ 501++8BD8 ~
+ 502++8BD8 ~            FileLoadNoHeader:
+ 503++8BD8 ~            	push	ix
+ 504++8BD8 ~            	pop		hl
+ 505++8BD8 ~            	ld		bc, CH_DATA
+ 506++8BD8 ~            	add		hl, bc
+ 507++8BD8 ~            	ld		bc, SECT_SZ
+ 508++8BD8 ~            	ldir
+ 509++8BD8 ~            	jr		FileReadLoop
+ 510++8BD8 ~            ;Copy routine without FileFree as it messes the buffers, probably moves up variables.
+ 511++8BD8 ~            FileLoadEnd:
+ 512++8BD8 ~
+ 513++8BD8 ~            FileFree:
+ 514++8BD8 ~            	push	de
+ 515++8BD8 ~            	rst		8
+ 516++8BD8 ~            	defb	56			;close channel (52) or detroy channel (56)
+ 517++8BD8 ~            	pop		de
+ 518++8BD8 ~            	ret
+ 519++8BD8 ~
+ 520++8BD8 ~
+ 521++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 522++8BD8 ~            ;HL = destination buffer, B = count of sectors, DE = track/sector
+ 523++8BD8 ~            ;Out: A = error code, 0=OK
+ 524++8BD8 ~            ReadDiskSectors:
+ 525++8BD8 ~            	push bc
+ 526++8BD8 ~            		push hl
+ 527++8BD8 ~            			push de
+ 528++8BD8 ~            				call ReadOneDiskSector
+ 529++8BD8 ~            			pop de
+ 530++8BD8 ~            		pop hl
+ 531++8BD8 ~
+ 532++8BD8 ~            		inc d
+ 533++8BD8 ~            		inc h
+ 534++8BD8 ~            	pop bc
+ 535++8BD8 ~
+ 536++8BD8 ~            	ld	a, (RWTSRes)
+ 537++8BD8 ~            	or	a
+ 538++8BD8 ~            	ret nz
+ 539++8BD8 ~
+ 540++8BD8 ~            	djnz ReadDiskSectors
+ 541++8BD8 ~            	ret
+ 542++8BD8 ~
+ 543++8BD8 ~            ;HL = source buffer, B = count of sectors, DE = track/sector
+ 544++8BD8 ~            ;Out: A = error code, 0=OK
+ 545++8BD8 ~            WriteDiskSectors:
+ 546++8BD8 ~            	push bc
+ 547++8BD8 ~            		push hl
+ 548++8BD8 ~            			push de
+ 549++8BD8 ~            				call WriteOneDiskSector
+ 550++8BD8 ~            			pop de
+ 551++8BD8 ~            		pop hl
+ 552++8BD8 ~
+ 553++8BD8 ~            		inc d
+ 554++8BD8 ~            		inc h
+ 555++8BD8 ~            	pop bc
+ 556++8BD8 ~
+ 557++8BD8 ~            	ld	a, (RWTSRes)
+ 558++8BD8 ~            	or	a
+ 559++8BD8 ~            	ret nz
+ 560++8BD8 ~
+ 561++8BD8 ~            	djnz WriteDiskSectors
+ 562++8BD8 ~            	ret
+ 563++8BD8 ~
+ 564++8BD8 ~
+ 565++8BD8 ~            ;Reads disk catalog
+ 566++8BD8 ~            ReadCatalogTrack:
+ 567++8BD8 ~            	ld hl, TrackBuf
+ 568++8BD8 ~            	ld de, 0
+ 569++8BD8 ~            	ld b, SPT
+ 570++8BD8 ~
+ 571++8BD8 ~            	call ReadDiskSectors
+ 572++8BD8 ~            	or   a
+ 573++8BD8 ~            	ret  nz
+ 574++8BD8 ~
+ 575++8BD8 ~            	;Sync BDOS disk, to avoid disk R/O error on disk change
+ 576++8BD8 ~            	push  af
+ 577++8BD8 ~            		ld  a, (RWTSDrive)
+ 578++8BD8 ~            		call BDOSSelectDisk
+ 579++8BD8 ~            		call BDOSInit
+ 580++8BD8 ~            	pop   af
+ 581++8BD8 ~            	ret
+ 582++8BD8 ~
+ 583++8BD8 ~
+ 584++8BD8 ~
+ 585++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 586++8BD8 ~
+ 587++8BD8 ~            ;IN: DE = file name to search in cache, HL = file cache table, C = item count
+ 588++8BD8 ~            FindCache:
+ 589++8BD8 ~            	ld		b, NAMELEN
+ 590++8BD8 ~            	call	StrCmp			;find the file to wich this extension belongs
+ 591++8BD8 ~            	ret		z
+ 592++8BD8 ~
+ 593++8BD8 ~            	dec		c
+ 594++8BD8 ~            	jr		nz, CacheNotFinished
+ 595++8BD8 ~            	or		c
+ 596++8BD8 ~            	ret
+ 597++8BD8 ~
+ 598++8BD8 ~            CacheNotFinished:
+ 599++8BD8 ~            	ld		bc, CACHE_SZ
+ 600++8BD8 ~            	add		hl, bc			;to the next cache line
+ 601++8BD8 ~            	jr		FindCache
+ 602++8BD8 ~
+ 603++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 604++8BD8 ~
+ 605++8BD8 ~            	;ld		ix, (SelFileCache)
+ 606++8BD8 ~            ReadFileHeader:
+ 607++8BD8 ~            	ld		a, (ix + CACHE_FLAG)
+ 608++8BD8 ~            	or		a
+ 609++8BD8 ~            	ret		nz				;return if already read
+ 610++8BD8 ~
+ 611++8BD8 ~            	ld		l, (ix + CACHE_FIRST_AU)
+ 612++8BD8 ~            	ld		h, (ix + CACHE_FIRST_AU + 1)
+ 613++8BD8 ~            	ld		a, h
+ 614++8BD8 ~            	or		l
+ 615++8BD8 ~            	jr		z, ReadHeaderEnd
+ 616++8BD8 ~            	call	AU2TS
+ 617++8BD8 ~            	ld		d, b
+ 618++8BD8 ~            	ld		e, c
+ 619++8BD8 ~            	ld		hl, DataBuf
+ 620++8BD8 ~            	push	ix
+ 621++8BD8 ~            	push	ix
+ 622++8BD8 ~            		call	ReadOneDiskSector
+ 623++8BD8 ~            	pop		hl
+ 624++8BD8 ~            	pop		ix
+ 625++8BD8 ~            	ld		bc, CACHE_HDR
+ 626++8BD8 ~            	add		hl, bc
+ 627++8BD8 ~            	ex		hl, de
+ 628++8BD8 ~            	ld		hl, DataBuf
+ 629++8BD8 ~            	ld		bc, HDR_SZ
+ 630++8BD8 ~            	ldir
+ 631++8BD8 ~            ReadHeaderEnd:
+ 632++8BD8 ~            	inc		(ix + CACHE_FLAG)
+ 633++8BD8 ~            	ret
+ 634++8BD8 ~
+ 635++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 636++8BD8 ~
+ 637++8BD8 ~            ;IN: HL = address from IF1 to call
+ 638++8BD8 ~            IF1Call:
+ 639++8BD8 ~            	LD   (HD11), HL
+ 640++8BD8 ~            	RST  8
+ 641++8BD8 ~            	DEFB 50
+ 642++8BD8 ~            	RET
+ 643++8BD8 ~
+ 644++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 645++8BD8 ~
+ 646++8BD8 ~            ;Load a program from disk
+ 647++8BD8 ~            ;IN: HL = file name addr
+ 648++8BD8 ~            LoadProgram:
+ 649++8BD8 ~            	LD   (FSTR1), HL
+ 650++8BD8 ~            	LD   H, 0
+ 651++8BD8 ~            	LD   L, NAMELEN
+ 652++8BD8 ~            	LD   (NSTR1), HL
+ 653++8BD8 ~            	LD	 A, (RWTSDrive)
+ 654++8BD8 ~            	INC  A					;Adapt for BASIC drive number
+ 655++8BD8 ~            	LD   L, A
+ 656++8BD8 ~            	LD   (DSTR1), HL
+ 657++8BD8 ~            	LD   HL, LOAD_ADDR
+ 658++8BD8 ~            	CALL IF1Call
+ 659++8BD8 ~            	RET
+ 660++8BD8 ~
+ 661++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 662++8BD8 ~
+ 663++8BD8 ~            SetFastKeys:
+ 664++8BD8 ~            	ld		hl, REPDEL
+ 665++8BD8 ~            	ld		de, (1 << 8) | 15
+ 666++8BD8 ~            	ld		(hl), de
+ 667++8BD8 ~
+ 668++8BD8 ~            	ret
+ 669++8BD8 ~
+ 670++8BD8 ~
+ 671++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 672++8BD8 ~            GetErrMsg:
+ 673++8BD8 ~            	inc		a
+ 674++8BD8 ~            	ex		af, af'
+ 675++8BD8 ~
+ 676++8BD8 ~            	ld		hl, IF1Paged			;page-in IF1
+ 677++8BD8 ~            	ld		(HD11), hl
+ 678++8BD8 ~            	rst		8
+ 679++8BD8 ~            	defb	50
+ 680++8BD8 ~            	ret								;return after accesing IF1
+ 681++8BD8 ~
+ 682++8BD8 ~            IF1Paged:
+ 683++8BD8 ~            	ld		hl, ERRMSG
+ 684++8BD8 ~            	ex		af, af'
+ 685++8BD8 ~            	or		a
+ 686++8BD8 ~            	jr		z, SaveMsg
+ 687++8BD8 ~
+ 688++8BD8 ~            	ld		b, 0
+ 689++8BD8 ~            SearchMsgEnd:
+ 690++8BD8 ~            	bit		7, (hl)
+ 691++8BD8 ~            	inc		hl
+ 692++8BD8 ~            	jr		z, SearchMsgEnd
+ 693++8BD8 ~
+ 694++8BD8 ~            	inc		b
+ 695++8BD8 ~            	cp		b
+ 696++8BD8 ~            	jr		nz, SearchMsgEnd
+ 697++8BD8 ~
+ 698++8BD8 ~            SaveMsg:
+ 699++8BD8 ~            	ld		de, DataBuf
+ 700++8BD8 ~            CopyMsg:
+ 701++8BD8 ~            	ld		a, (hl)
+ 702++8BD8 ~            	bit		7, a
+ 703++8BD8 ~            	ld		(de), a
+ 704++8BD8 ~            	inc		hl
+ 705++8BD8 ~            	inc		de
+ 706++8BD8 ~            	jr		z, CopyMsg
+ 707++8BD8 ~
+ 708++8BD8 ~            	ret
+ 709++8BD8 ~
+ 710++8BD8 ~            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 711++8BD8 ~
+ 712++8BD8 ~            ;RWTS routine I/O block
+ 713++8BD8 ~            RWTSParams:
+ 714++8BD8 ~            RWTSBlockType	DEFB	1
+ 715++8BD8 ~            RWTSDrive		DEFB	DRIVE_A_CPM					;NOT like BASIC (0,1,2), just 0,1.
+ 716++8BD8 ~            RWTSVolNo		DEFB	0
+ 717++8BD8 ~            RWTSTrack		DEFB	0
+ 718++8BD8 ~            RWTSSector		DEFB	0
+ 719++8BD8 ~            RWTSDMA			DEFW	0
+ 720++8BD8 ~            RWTSExtBuf		DEFW	$2932
+ 721++8BD8 ~            RWTSPrmTbl		DEFW	$1f2a
+ 722++8BD8 ~            RWTSCmd			DEFB	RWTS_CMD_READ
+ 723++8BD8 ~            ;Results
+ 724++8BD8 ~            RWTSRes			DEFB	0
+ 725++8BD8 ~            RWTSResVolNo	DEFB	0
+ 726++8BD8 ~            RWTSResTmp		DEFB	0, 0, 0, 0, 0
+ 727++8BD8 ~
+ 728++8BD8 ~            ;Param. table, found in ROM, cannot be overriden, it seems the IF1 routine always uses the constants from ROM.
+ 729++8BD8 ~            /*
+ 730++8BD8 ~            BasPrmTbl:
+ 731++8BD8 ~            PrmDevType		DEFB	$01			;$01
+ 732++8BD8 ~            PrmStepRate		DEFB	$06;$09		;$0D	(milisec)
+ 733++8BD8 ~            PrmHeadLoad		DEFB	$10;$16		;$23	(milisec)
+ 734++8BD8 ~            PrmSpinUp		DEFB	$20;$50		;$64	(1/100 sec)
+ 735++8BD8 ~            PrmIntrlvTbl	DEFW	InterleaveTbl
+ 736++8BD8 ~            InterleaveTbl   DEFB	1, 3, 5, 7, 9, 11, 13, 15, 2, 4, 6, 8, 10, 12, 14, 16
+ 737++8BD8 ~            */
+ 738++8BD8 ~
+ 739++8BD8              	endif
+# file closed: disk.asm
+  16+ 8BD8
+  17+ 8BD8              BDOSInit:
+  18+ 8BD8 AF           	xor		a
+  19+ 8BD9 18 3D        	jr		BDOS
+  20+ 8BDB
+  21+ 8BDB
+  22+ 8BDB              ;IN: A = Drive to select
+  23+ 8BDB              	ifused BDOSSelectDisk
+  24+ 8BDB              BDOSSelectDisk:
+  25+ 8BDB DD 6F        	ld		ixl, a
+  26+ 8BDD DD 26 00     	ld		ixh, 0
+  27+ 8BE0 3E 01        	ld		a, 1
+  28+ 8BE2 18 34        	jr		BDOS
+  29+ 8BE4              	endif
+  30+ 8BE4
+  31+ 8BE4              	ifused BDOSMakeDiskRO
+  32+ 8BE4 ~            BDOSMakeDiskRO:
+  33+ 8BE4 ~            	ld		a, 15
+  34+ 8BE4 ~            	jr		BDOS
+  35+ 8BE4              	endif
+  36+ 8BE4
+  37+ 8BE4              ;Get Read Only flag
+  38+ 8BE4              ;OUT: HL = bitflags of R/O drives, A = LSb, P = MSb
+  39+ 8BE4              	ifused BDOSGetDiskRO
+  40+ 8BE4 ~            BDOSGetDiskRO:
+  41+ 8BE4 ~            	ld	a, 16
+  42+ 8BE4 ~            	jr	BDOS
+  43+ 8BE4              	endif
+  44+ 8BE4
+  45+ 8BE4              	ifused BDOSGetCurrentDisk
+  46+ 8BE4 ~            BDOSGetCurrentDisk:
+  47+ 8BE4 ~            	ld		a, 12
+  48+ 8BE4 ~            	jr		BDOS
+  49+ 8BE4              	endif
+  50+ 8BE4
+  51+ 8BE4
+  52+ 8BE4              ;Create a disk channel for BDOS access (does not open the file)
+  53+ 8BE4              ;IN: HL=name addr, A=drive
+  54+ 8BE4              ;OUT: IX=FCB
+  55+ 8BE4              CreateChannel:
+  56+ 8BE4 22 DC 5C     	ld (FSTR1), hl
+  57+ 8BE7 26 00        	ld h,0
+  58+ 8BE9 6F           	ld l,a
+  59+ 8BEA 22 D6 5C     	ld (DSTR1), hl
+  60+ 8BED 2E 0B        	ld l,NAMELEN
+  61+ 8BEF 22 DA 5C     	ld (NSTR1), hl
+  62+ 8BF2 CF           	rst 08
+  63+ 8BF3 37           	DEFB 55
+  64+ 8BF4 01 0C 00     	ld bc, CH_FCB			;adjust to get cp/m fcb
+  65+ 8BF7 DD 09        	add ix, bc
+  66+ 8BF9 C9           	ret
+  67+ 8BFA
+  68+ 8BFA
+  69+ 8BFA              ;Destroy a BDOS channel
+  70+ 8BFA              ;IN: IX=FCB
+  71+ 8BFA              DestroyChannel:
+  72+ 8BFA C5           	push bc
+  73+ 8BFB 01 F4 FF     	ld bc, -CH_FCB			;adjust to get the basic channel
+  74+ 8BFE DD 09        	add ix, bc
+  75+ 8C00 CF           	rst 08
+  76+ 8C01 38           	DEFB 56
+  77+ 8C02 C1           	pop bc
+  78+ 8C03 C9           	ret
+  79+ 8C04
+  80+ 8C04
+  81+ 8C04              ;Input: IX=FCB
+  82+ 8C04              CreateFile:
+  83+ 8C04 3E 09        	ld	a, 9
+  84+ 8C06 18 10        	jr	BDOS
+  85+ 8C08
+  86+ 8C08              ;Input: IX=FCB
+  87+ 8C08              OpenFile:
+  88+ 8C08 3E 02        	ld	a, 2
+  89+ 8C0A 18 0C        	jr	BDOS
+  90+ 8C0C
+  91+ 8C0C              ;IN: IX=FCB
+  92+ 8C0C              CloseFile:
+  93+ 8C0C 3E 03        	ld	a, 3
+  94+ 8C0E 18 08        	jr	BDOS
+  95+ 8C10
+  96+ 8C10              ;IN: IX=FCB
+  97+ 8C10              ReadFileBlock:
+  98+ 8C10 3E 07        	ld	a, 7
+  99+ 8C12 18 04        	jr	BDOS
+ 100+ 8C14
+ 101+ 8C14              ;IN: IX=FCB
+ 102+ 8C14              WriteFileBlock:
+ 103+ 8C14 3E 08        	ld	a, 8
+ 104+ 8C16 18 00        	jr	BDOS
+ 105+ 8C18
+ 106+ 8C18              ;Generic BDOS call
+ 107+ 8C18              ;IX=arg, A=function
+ 108+ 8C18              BDOS:
+ 109+ 8C18 DD 22 ED 5C  	ld (HD11), ix
+ 110+ 8C1C 32 EF 5C     	ld (COPIES), a
+ 111+ 8C1F CF           	rst 08
+ 112+ 8C20 39           	DEFB 57
+ 113+ 8C21 C9           	ret
+ 114+ 8C22
+ 115+ 8C22              ;FindFirst
+ 116+ 8C22              ;IX=fcb
+ 117+ 8C22              	ifused BDOSFindFirst
+ 118+ 8C22 ~            BDOSFindFirst:
+ 119+ 8C22 ~            	ld a, 4
+ 120+ 8C22 ~            	jr BDOS
+ 121+ 8C22              	endif
+ 122+ 8C22
+ 123+ 8C22              ;FindNext
+ 124+ 8C22              ;IX=fcb
+ 125+ 8C22              	ifused BDOSFindNext
+ 126+ 8C22 ~            BDOSFindNext:
+ 127+ 8C22 ~            	ld a, 5
+ 128+ 8C22 ~            	jr BDOS
+ 129+ 8C22              	endif
+ 130+ 8C22
+ 131+ 8C22
+ 132+ 8C22              ;Set DMA address for BDOS
+ 133+ 8C22              ;IX=DMA
+ 134+ 8C22              SetDMA:
+ 135+ 8C22 3E 0D        	ld a, 13
+ 136+ 8C24 18 F2        	jr BDOS
+ 137+ 8C26
+ 138+ 8C26              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 139+ 8C26              ;HL=file name, A=drive
+ 140+ 8C26              DeleteFile:
+ 141+ 8C26 CD E4 8B     	call	CreateChannel
+ 142+ 8C29
+ 143+ 8C29 3E 06        	ld		a, 6
+ 144+ 8C2B CD 18 8C     	call	BDOS
+ 145+ 8C2E
+ 146+ 8C2E CD FA 8B     	call	DestroyChannel
+ 147+ 8C31 C9           	ret
+ 148+ 8C32
+ 149+ 8C32              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 150+ 8C32              ;IN: E0 = RO, E1 = SYS, HL=filename
+ 151+ 8C32              ChangeFileAttrib:
+ 152+ 8C32 3A C6 8B     	ld 		a, (RWTSDrive)
+ 153+ 8C35 3C           	inc		a					;Convert to BASIC drive number: 1,2
+ 154+ 8C36 D5           	push	de
+ 155+ 8C37 CD E4 8B     	call	CreateChannel
+ 156+ 8C3A D1           	pop		de
+ 157+ 8C3B
+ 158+ 8C3B DD 7E 09     	ld		a, (ix + EXT_NAME + RO_POS)
+ 159+ 8C3E CB 27        	sla		a								;reset existing attribute flag
+ 160+ 8C40 CB 1B        	rr		e								;put wanted flag in Carry flag
+ 161+ 8C42 CB 1F        	rr		a								;put Carry flag in register L
+ 162+ 8C44 DD 77 09     	ld		(ix + EXT_NAME + RO_POS), a		;set wanted flag
+ 163+ 8C47
+ 164+ 8C47 DD 7E 0A     	ld		a, (ix + EXT_NAME + SYS_POS)
+ 165+ 8C4A CB 27        	sla		a
+ 166+ 8C4C CB 1B        	rr		e
+ 167+ 8C4E CB 1F        	rr		a
+ 168+ 8C50 DD 77 0A     	ld		(ix + EXT_NAME + SYS_POS), a
+ 169+ 8C53
+ 170+ 8C53              FileAttribSet:
+ 171+ 8C53 3E 11        	ld		a, 17
+ 172+ 8C55 CD 18 8C     	call	BDOS
+ 173+ 8C58
+ 174+ 8C58 CD FA 8B     	call	DestroyChannel
+ 175+ 8C5B C9           	ret
+ 176+ 8C5C
+ 177+ 8C5C              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 178+ 8C5C
+ 179+ 8C5C              ;HL=original name, DE = new name
+ 180+ 8C5C              ;Works only on the same drive.
+ 181+ 8C5C              RenameFile:
+ 182+ 8C5C 3A C6 8B     	ld 		a, (RWTSDrive)
+ 183+ 8C5F 3C           	inc		a					;Convert to BASIC drive number: 1,2
+ 184+ 8C60 D5           	push	de
+ 185+ 8C61 CD E4 8B     	call	CreateChannel
+ 186+ 8C64 D1           	pop		de
+ 187+ 8C65
+ 188+ 8C65 DD E5        	push	ix					;IX == FCB
+ 189+ 8C67 E1           	pop		hl
+ 190+ 8C68 01 11 00     	ld		bc, 17				;new name must be found at FCB + 16
+ 191+ 8C6B 09           	add		hl, bc
+ 192+ 8C6C EB           	ex		de, hl
+ 193+ 8C6D 3A C6 8B     	ld		a, (RWTSDrive)
+ 194+ 8C70 12           	ld		(de), a
+ 195+ 8C71 01 0B 00     	ld		bc, NAMELEN
+ 196+ 8C74 ED B0        	ldir
+ 197+ 8C76
+ 198+ 8C76 3E 0A        	ld		a, 10
+ 199+ 8C78 CD 18 8C     	call	BDOS
+ 200+ 8C7B
+ 201+ 8C7B CD FA 8B     	call	DestroyChannel
+ 202+ 8C7E C9           	ret
+ 203+ 8C7F
+ 204+ 8C7F              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 205+ 8C7F              CopyFileDMA		EQU	DataBuf + 4+1
+ 206+ 8C7F              CopyFileRes		EQU DataBuf + 4
+ 207+ 8C7F              CopyFileFCBDst	EQU	DataBuf + 2
+ 208+ 8C7F              CopyFileFCBSrc	EQU	DataBuf
+ 209+ 8C7F
+ 210+ 8C7F              ;Will copy a file from A: to B: or vice versa.
+ 211+ 8C7F              ;HL=source file name
+ 212+ 8C7F              CopyFile:
+ 213+ 8C7F              	;Prepare source file
+ 214+ 8C7F E5           	push hl
+ 215+ 8C80 3A C6 8B     		ld 		a, (RWTSDrive)
+ 216+ 8C83 3C           		inc		a					;Convert to BASIC drive number: 1,2
+ 217+ 8C84 CD E4 8B     		call	CreateChannel
+ 218+ 8C87 CD 08 8C     		call 	OpenFile
+ 219+ 8C8A DD 22 C9 B2  		ld		(CopyFileFCBSrc), ix
+ 220+ 8C8E E1           	pop hl
+ 221+ 8C8F 3C           	inc  	a					;Cancel if A==$FF
+ 222+ 8C90 28 32        	jr   	z, CopyFileEnd
+ 223+ 8C92
+ 224+ 8C92              	;Create destination file
+ 225+ 8C92 DD 7E 00     	ld		a, (ix)
+ 226+ 8C95 EE 03        	xor		%11					;Alternate drive, A->B, B-A
+ 227+ 8C97 CD E4 8B     	call	CreateChannel
+ 228+ 8C9A CD 04 8C     	call 	CreateFile
+ 229+ 8C9D DD 22 CB B2  	ld		(CopyFileFCBDst), ix
+ 230+ 8CA1 3C           	inc  	a					;Cancel if A==$FF
+ 231+ 8CA2 28 20        	jr   	z, CopyFileEnd
+ 232+ 8CA4
+ 233+ 8CA4              	;Set DMA
+ 234+ 8CA4 DD 21 CE B2  	ld		ix, CopyFileDMA
+ 235+ 8CA8 CD 22 8C     	call 	SetDMA
+ 236+ 8CAB
+ 237+ 8CAB              FileCopyLoop:
+ 238+ 8CAB DD 2A C9 B2  	ld		ix, (CopyFileFCBSrc)
+ 239+ 8CAF CD 10 8C     	call 	ReadFileBlock
+ 240+ 8CB2 B7           	or		a
+ 241+ 8CB3 20 0F        	jr		nz, CopyFileEnd
+ 242+ 8CB5
+ 243+ 8CB5 DD 2A CB B2  	ld		ix, (CopyFileFCBDst)
+ 244+ 8CB9 CD 14 8C     	call	WriteFileBlock
+ 245+ 8CBC B7           	or		a
+ 246+ 8CBD 32 CD B2     	ld		(CopyFileRes), a
+ 247+ 8CC0 20 02        	jr		nz, CopyFileEnd
+ 248+ 8CC2
+ 249+ 8CC2 18 E7        	jr		FileCopyLoop
+ 250+ 8CC4
+ 251+ 8CC4              CopyFileEnd:
+ 252+ 8CC4 DD 2A CB B2  	ld		ix, (CopyFileFCBDst)
+ 253+ 8CC8 CD 0C 8C     	call 	CloseFile			;close destination file
+ 254+ 8CCB CD FA 8B     	call 	DestroyChannel
+ 255+ 8CCE
+ 256+ 8CCE              	;Don't need to close source file, but must free channel
+ 257+ 8CCE              	;ld		ix, (CopyFileFCBSrc)
+ 258+ 8CCE              	;call 	CloseFile
+ 259+ 8CCE DD 2A C9 B2  	ld		ix, (CopyFileFCBSrc)
+ 260+ 8CD2 CD FA 8B     	call 	DestroyChannel
+ 261+ 8CD5
+ 262+ 8CD5 3A CD B2     	ld		a, (CopyFileRes)
+ 263+ 8CD8
+ 264+ 8CD8 C9           	ret
+ 265+ 8CD9
+ 266+ 8CD9              	endif
+ 267+ 8CD9
+# file closed: bdos.asm
+1111  8CD9              	include "txtview.asm"
+# file opened: txtview.asm
+   1+ 8CD9              ; 	DEVICE ZXSPECTRUM48
+   2+ 8CD9
+   3+ 8CD9              LINE_CNT	EQU	23
+   4+ 8CD9              COL_CNT		EQU	64
+   5+ 8CD9
+   6+ 8CD9              CHAR_CR		EQU	$0D
+   7+ 8CD9              CHAR_LF		EQU	$0A
+   8+ 8CD9              CHAR_TAB	EQU	$09
+   9+ 8CD9
+  10+ 8CD9              COORDS		EQU	23728		;Coordinates
+  11+ 8CD9
+  12+ 8CD9
+  13+ 8CD9              InitViewer:
+  14+ 8CD9 22 25 90     	ld		 (FileBegin), hl
+  15+ 8CDC 09           	add		hl, bc
+  16+ 8CDD              	;must filter any EOF chars, max 256 of them.
+  17+ 8CDD 25           	dec		h
+  18+ 8CDE 3E 1A        	ld		a, 0x1A
+  19+ 8CE0 ED B1        	cpir
+  20+ 8CE2 2B           	dec		hl
+  21+ 8CE3 22 29 90     	ld		(FileEnd), hl
+  22+ 8CE6 ED 5B 25 90  	ld		de, (FileBegin)
+  23+ 8CEA B7           	or		a
+  24+ 8CEB ED 52        	sbc		hl, de
+  25+ 8CED 22 27 90     	ld		(FileLen), hl
+  26+ 8CF0
+  27+ 8CF0 3E 0D        	ld		a, 0x0D
+  28+ 8CF2 77           	ld		(hl), a
+  29+ 8CF3
+  30+ 8CF3
+  31+ 8CF3 21 04 02     	ld		hl, (2 << 8) | 4
+  32+ 8CF6 22 09 5C     	ld		(23561), hl
+  33+ 8CF9
+  34+ 8CF9 21 00 00     	ld		hl, 0
+  35+ 8CFC 22 B0 5C     	ld		(COORDS), hl
+  36+ 8CFF
+  37+ 8CFF 21 00 58     	ld		hl, 16384 + 6144
+  38+ 8D02 54           	ld		d, h
+  39+ 8D03 5D           	ld		e, l
+  40+ 8D04 13           	inc		de
+  41+ 8D05 01 FF 02     	ld		bc, 767
+  42+ 8D08 36 0F        	ld		(hl), (1 << 3) | 7
+  43+ 8D0A ED B0        	ldir
+  44+ 8D0C
+  45+ 8D0C CD 2B 8F     	call	ScrollInit
+  46+ 8D0F
+  47+ 8D0F 11 00 00     	ld		de, 0
+  48+ 8D12 ED 53 20 90  	ld		(CurLine), de
+  49+ 8D16
+  50+ 8D16              	;prepare file progress %
+  51+ 8D16 2A 27 90     	ld		hl, (FileLen)
+  52+ 8D19 7C           	ld		a, h
+  53+ 8D1A 4D           	ld		c, l
+  54+ 8D1B 11 64 00     	ld		de, 100
+  55+ 8D1E CD 1B 89     	call	Div2
+  56+ 8D21 67           	ld		h, a
+  57+ 8D22 69           	ld		l, c
+  58+ 8D23 22 2B 90     	ld		(PROGR_PERC), hl
+  59+ 8D26
+  60+ 8D26 CD BA 8E     	call	PrintMsg
+  61+ 8D29
+  62+ 8D29 DD 21 C7 B2  	ld		ix, FileIdx	- 2
+  63+ 8D2D 06 17        	ld		b, LINE_CNT
+  64+ 8D2F 2A 25 90     	ld		hl, (FileBegin)
+  65+ 8D32
+  66+ 8D32 C9           	ret
+  67+ 8D33
+  68+ 8D33              PrintLoop:
+  69+ 8D33 C5           	push	bc
+  70+ 8D34 DD 23        		inc		ix
+  71+ 8D36 DD 23        		inc		ix
+  72+ 8D38 DD 75 00     		ld		(ix), l
+  73+ 8D3B DD 74 01     		ld		(ix + 1), h
+  74+ 8D3E
+  75+ 8D3E CD 55 8E     		call	GetLine
+  76+ 8D41 CD 27 8E     		call	PrintLine
+  77+ 8D44
+  78+ 8D44 ED 5B 20 90  		ld		de, (CurLine)
+  79+ 8D48 13           		inc		de
+  80+ 8D49 ED 53 20 90  		ld		(CurLine), de
+  81+ 8D4D C1           	pop		bc
+  82+ 8D4E CD 1C 8E     	call	CheckEnd
+  83+ 8D51 28 13        	jr		z, EOF
+  84+ 8D53
+  85+ 8D53 10 DE        	djnz	PrintLoop
+  86+ 8D55 18 17        	jr		PrintLoop2
+  87+ 8D57
+  88+ 8D57              GetKey:
+  89+ 8D57 76           	halt
+  90+ 8D58 FD CB 01 6E  	bit		5, (iy + 1);
+  91+ 8D5C 28 F9        	jr		z, GetKey
+  92+ 8D5E FD CB 01 AE  	res		5, (iy + 1)
+  93+ 8D62 FD 7E CE     	ld		a, (iy - $32)
+  94+ 8D65 C9           	ret
+  95+ 8D66
+  96+ 8D66              EOF:
+  97+ 8D66 CD 57 8D     	call	GetKey
+  98+ 8D69 FE 30        	cp		'0'
+  99+ 8D6B 20 F9        	jr		nz, EOF
+ 100+ 8D6D C9           	ret
+ 101+ 8D6E
+ 102+ 8D6E              PrintLoop2:
+ 103+ 8D6E CD BA 8E     	call	PrintMsg
+ 104+ 8D71
+ 105+ 8D71 CD 57 8D     	call	GetKey
+ 106+ 8D74 FE 30        	cp		'0'					;Exit on 0
+ 107+ 8D76 C8           	ret		z
+ 108+ 8D77
+ 109+ 8D77 FE 0A        	cp		KEY_DOWN
+ 110+ 8D79 28 5C        	jr		z, Down
+ 111+ 8D7B
+ 112+ 8D7B FE 0B        	cp		KEY_UP
+ 113+ 8D7D 28 2D        	jr		z, Up
+ 114+ 8D7F
+ 115+ 8D7F FE 32        	cp		'2'
+ 116+ 8D81 20 EB        	jr		nz, PrintLoop2
+ 117+ 8D83
+ 118+ 8D83 3A 24 90     	ld		a, (WrapFlag)
+ 119+ 8D86 EE 01        	xor		1
+ 120+ 8D88 32 24 90     	ld		(WrapFlag), a
+ 121+ 8D8B B7           	or		a
+ 122+ 8D8C 28 0F        	jr		z, NoWrap
+ 123+ 8D8E
+ 124+ 8D8E 11 4F 6E     	ld		de, 'nO'
+ 125+ 8D91 ED 53 D6 8F  	ld		(MsgLineWrF), de
+ 126+ 8D95 3E 20        	ld		a, ' '
+ 127+ 8D97 32 D8 8F     	ld		(MsgLineWrF + 2), a
+ 128+ 8D9A C3 6E 8D     	jp		PrintLoop2
+ 129+ 8D9D
+ 130+ 8D9D              NoWrap:
+ 131+ 8D9D 11 4F 66     	ld		de, 'fO'
+ 132+ 8DA0 ED 53 D6 8F  	ld		(MsgLineWrF), de
+ 133+ 8DA4 3E 66        	ld		a, 'f'
+ 134+ 8DA6 32 D8 8F     	ld		(MsgLineWrF + 2), a
+ 135+ 8DA9
+ 136+ 8DA9 C3 6E 8D     	jp		PrintLoop2
+ 137+ 8DAC
+ 138+ 8DAC
+ 139+ 8DAC              Up:
+ 140+ 8DAC CD 0C 8E     	call	CheckBegin
+ 141+ 8DAF 28 BD        	jr		z, PrintLoop2
+ 142+ 8DB1
+ 143+ 8DB1 CD 59 8F     	call	ScrollUp
+ 144+ 8DB4
+ 145+ 8DB4 DD 2B        	dec		ix
+ 146+ 8DB6 DD 2B        	dec		ix
+ 147+ 8DB8 DD 6E D4     	ld		l, (ix - (LINE_CNT-1)*2)
+ 148+ 8DBB DD 66 D5     	ld		h, (ix - (LINE_CNT-1)*2 + 1)
+ 149+ 8DBE CD 55 8E     	call	GetLine						;extract previous line to display
+ 150+ 8DC1
+ 151+ 8DC1 11 00 00     	ld		de, 0
+ 152+ 8DC4 ED 53 B0 5C  	ld		(COORDS), de
+ 153+ 8DC8 CD 27 8E     	call	PrintLine
+ 154+ 8DCB
+ 155+ 8DCB 2A 20 90     	ld		hl, (CurLine)
+ 156+ 8DCE 2B           	dec		hl
+ 157+ 8DCF 22 20 90     	ld		(CurLine), hl
+ 158+ 8DD2 CD BA 8E     	call	PrintMsg
+ 159+ 8DD5 18 97        	jr		PrintLoop2
+ 160+ 8DD7
+ 161+ 8DD7
+ 162+ 8DD7              Down:
+ 163+ 8DD7 DD 6E 00     	ld		l, (ix)
+ 164+ 8DDA DD 66 01     	ld		h, (ix + 1)
+ 165+ 8DDD CD 55 8E     	call	GetLine						;get next line pointer
+ 166+ 8DE0
+ 167+ 8DE0 CD 1C 8E     	call	CheckEnd					;check if HL == file end
+ 168+ 8DE3 38 89        	jr		c, PrintLoop2
+ 169+ 8DE5
+ 170+ 8DE5 DD 23        	inc		ix								;save next line pointer
+ 171+ 8DE7 DD 23        	inc		ix
+ 172+ 8DE9 DD 75 00     	ld		(ix), l
+ 173+ 8DEC DD 74 01     	ld		(ix + 1), h
+ 174+ 8DEF
+ 175+ 8DEF CD 55 8E     	call	GetLine						;extract next line in buffer for display
+ 176+ 8DF2
+ 177+ 8DF2 CD 5E 8F     	call	ScrollDown
+ 178+ 8DF5
+ 179+ 8DF5 11 00 16     	ld		de, (LINE_CNT-1) << 8
+ 180+ 8DF8 ED 53 B0 5C  	ld		(COORDS), de
+ 181+ 8DFC CD 27 8E     	call	PrintLine
+ 182+ 8DFF
+ 183+ 8DFF 2A 20 90     	ld		hl, (CurLine)
+ 184+ 8E02 23           	inc		hl
+ 185+ 8E03 22 20 90     	ld		(CurLine), hl
+ 186+ 8E06 CD BA 8E     	call	PrintMsg
+ 187+ 8E09
+ 188+ 8E09 C3 6E 8D     	jp		PrintLoop2
+ 189+ 8E0C
+ 190+ 8E0C
+ 191+ 8E0C              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 192+ 8E0C              ;check begining of buffer
+ 193+ 8E0C              CheckBegin:
+ 194+ 8E0C E5           	push	hl
+ 195+ 8E0D DD 6E D4     		ld		l, (ix - (LINE_CNT-1) * 2)
+ 196+ 8E10 DD 66 D5     		ld		h, (ix - (LINE_CNT-1) * 2 + 1)
+ 197+ 8E13 ED 5B 25 90  		ld		de, (FileBegin)
+ 198+ 8E17 B7           		or		a
+ 199+ 8E18 ED 52        		sbc		hl, de
+ 200+ 8E1A E1           	pop		hl
+ 201+ 8E1B C9           	ret
+ 202+ 8E1C
+ 203+ 8E1C              ;check end of buffer
+ 204+ 8E1C              CheckEnd:
+ 205+ 8E1C E5           	push	hl
+ 206+ 8E1D ED 5B 29 90  		ld		de, (FileEnd)
+ 207+ 8E21 EB           		ex		de, hl
+ 208+ 8E22 B7           		or		a
+ 209+ 8E23 ED 52        		sbc		hl, de
+ 210+ 8E25 E1           	pop		hl
+ 211+ 8E26 C9           	ret
+ 212+ 8E27
+ 213+ 8E27              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 214+ 8E27              ;Print a line
+ 215+ 8E27              PrintLine:
+ 216+ 8E27 11 E0 8F     	ld		de, LineBuf
+ 217+ 8E2A 06 40        	ld		b, COL_CNT
+ 218+ 8E2C
+ 219+ 8E2C CD 3B 8E     	call	PrintStrTxt
+ 220+ 8E2F
+ 221+ 8E2F              	;go to the next screen line
+ 222+ 8E2F ED 5B B0 5C  	ld		de, (COORDS)
+ 223+ 8E33 14           	inc		d
+ 224+ 8E34 1E 00        	ld		e, 0
+ 225+ 8E36 ED 53 B0 5C  	ld		(COORDS), de
+ 226+ 8E3A C9           	ret
+ 227+ 8E3B
+ 228+ 8E3B              PrintStrTxt:
+ 229+ 8E3B 1A           	ld		a, (de)
+ 230+ 8E3C 13           	inc		de
+ 231+ 8E3D D5           	push	de
+ 232+ 8E3E 32 81 5C     		ld		(CODE), a
+ 233+ 8E41 C5           		push	bc
+ 234+ 8E42 E5           			push	hl
+ 235+ 8E43 CD 43 88     				call	PrintChar
+ 236+ 8E46 E1           			pop		hl
+ 237+ 8E47 C1           		pop		bc
+ 238+ 8E48
+ 239+ 8E48 ED 5B B0 5C  		ld		de, (COORDS)
+ 240+ 8E4C 1C           		inc		e
+ 241+ 8E4D ED 53 B0 5C  		ld		(COORDS), de
+ 242+ 8E51 D1           	pop		de
+ 243+ 8E52 10 E7        	djnz	PrintStrTxt
+ 244+ 8E54 C9           	ret
+ 245+ 8E55
+ 246+ 8E55              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 247+ 8E55              ;Extract a line of text to fit exactly on a 64 screen line
+ 248+ 8E55              ;IN:	HL = current file pointer
+ 249+ 8E55              ;OUT:	LineBuf = new line for display, HL = pointer to the next line
+ 250+ 8E55              GetLine:
+ 251+ 8E55 11 E0 8F     	ld		de, LineBuf
+ 252+ 8E58 06 40        	ld		b, COL_CNT
+ 253+ 8E5A              GetLineLoop:
+ 254+ 8E5A 7E           	ld		a, (hl)
+ 255+ 8E5B 23           	inc		hl
+ 256+ 8E5C
+ 257+ 8E5C FE 0D        	cp		CHAR_CR
+ 258+ 8E5E 28 29        	jr		z, GetLineSkip0A
+ 259+ 8E60
+ 260+ 8E60 FE 0A        	cp		CHAR_LF
+ 261+ 8E62 28 25        	jr		z, GetLineSkip0A
+ 262+ 8E64
+ 263+ 8E64 FE 09        	cp		CHAR_TAB
+ 264+ 8E66 20 07        	jr		nz, GetLineNext
+ 265+ 8E68
+ 266+ 8E68 3E 20        	ld		a, ' '
+ 267+ 8E6A 12           	ld		(de), a
+ 268+ 8E6B 13           	inc		de
+ 269+ 8E6C 05           	dec		b
+ 270+ 8E6D 28 11        	jr		z, GetLineSkip0D	;skip tab on end of line
+ 271+ 8E6F
+ 272+ 8E6F              GetLineNext:
+ 273+ 8E6F FE 20        	cp		' '
+ 274+ 8E71 38 06        	jr		c, NotValid
+ 275+ 8E73
+ 276+ 8E73 FE 80        	cp		128
+ 277+ 8E75 30 02        	jr		nc, NotValid
+ 278+ 8E77 18 03        	jr		Valid
+ 279+ 8E79
+ 280+ 8E79              NotValid:
+ 281+ 8E79 CD 09 8F     	call	ReplaceChars
+ 282+ 8E7C
+ 283+ 8E7C              Valid:
+ 284+ 8E7C 12           	ld		(de), a
+ 285+ 8E7D 13           	inc		de
+ 286+ 8E7E 10 DA        	djnz	GetLineLoop
+ 287+ 8E80
+ 288+ 8E80              ;if line is exactly 64 char long, must skip the new line char(s)
+ 289+ 8E80              GetLineSkip0D:
+ 290+ 8E80 0E 00        	ld		c, 0
+ 291+ 8E82 3E 0D        	ld		a, CHAR_CR						;skip 0D
+ 292+ 8E84 BE           	cp		(hl)
+ 293+ 8E85 20 02        	jr		nz, GetLineSkip0A
+ 294+ 8E87 23           	inc		hl
+ 295+ 8E88 0C           	inc		c
+ 296+ 8E89
+ 297+ 8E89              GetLineSkip0A:						;skip 0A
+ 298+ 8E89 3E 0A        	ld		a, CHAR_LF
+ 299+ 8E8B BE           	cp		(hl)
+ 300+ 8E8C 20 02        	jr		nz, GetLineFill
+ 301+ 8E8E 23           	inc		hl
+ 302+ 8E8F 0C           	inc		c
+ 303+ 8E90
+ 304+ 8E90              GetLineFill:
+ 305+ 8E90 78           	ld		a, b
+ 306+ 8E91 B7           	or		a
+ 307+ 8E92 20 1F        	jr		nz, GetLineFillLoop
+ 308+ 8E94
+ 309+ 8E94 79           	ld		a, c
+ 310+ 8E95 B7           	or		a
+ 311+ 8E96 C0           	ret		nz
+ 312+ 8E97
+ 313+ 8E97              	;wrap or not
+ 314+ 8E97 3A 24 90     	ld		a, (WrapFlag)
+ 315+ 8E9A B7           	or		a
+ 316+ 8E9B C0           	ret		nz
+ 317+ 8E9C
+ 318+ 8E9C ED 5B 29 90  	ld		de, (FileEnd)
+ 319+ 8EA0 E5           	push	hl
+ 320+ 8EA1 EB           	ex		de, hl
+ 321+ 8EA2 B7           	or		a
+ 322+ 8EA3 ED 52        	sbc		hl, de
+ 323+ 8EA5 44           	ld		b, h
+ 324+ 8EA6 4D           	ld		c, l
+ 325+ 8EA7 3E 0D        	ld		a, CHAR_CR
+ 326+ 8EA9 E1           	pop		hl
+ 327+ 8EAA ED B1        	cpir
+ 328+ 8EAC C0           	ret		nz
+ 329+ 8EAD 3E 0A        	ld		a, CHAR_LF
+ 330+ 8EAF BE           	cp		(hl)
+ 331+ 8EB0 C0           	ret		nz
+ 332+ 8EB1 23           	inc		hl
+ 333+ 8EB2
+ 334+ 8EB2 C9           	ret
+ 335+ 8EB3
+ 336+ 8EB3              GetLineFillLoop:				;fill the rest of the displayed line with blanks
+ 337+ 8EB3 3E 20        	ld		a, ' '
+ 338+ 8EB5 12           	ld		(de), a
+ 339+ 8EB6 13           	inc		de
+ 340+ 8EB7 10 FA        	djnz	GetLineFillLoop
+ 341+ 8EB9 C9           	ret
+ 342+ 8EBA
+ 343+ 8EBA              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 344+ 8EBA              PrintMsg:
+ 345+ 8EBA ED 5B B0 5C  	ld		de, (COORDS)
+ 346+ 8EBE D5           	push	de
+ 347+ 8EBF 11 00 17     	ld		de, LINE_CNT<<8
+ 348+ 8EC2 ED 53 B0 5C  	ld		(COORDS), de
+ 349+ 8EC6
+ 350+ 8EC6              	;Get current file pointer
+ 351+ 8EC6 DD 6E 00     	ld		l, (ix)
+ 352+ 8EC9 DD 66 01     	ld		h, (ix + 1)
+ 353+ 8ECC ED 4B 25 90  	ld		bc, (FileBegin)
+ 354+ 8ED0 B7           	or		a
+ 355+ 8ED1 ED 42        	sbc		hl, bc
+ 356+ 8ED3
+ 357+ 8ED3              	;Divide by one percent length
+ 358+ 8ED3 7C           	ld		a, h
+ 359+ 8ED4 4D           	ld		c, l
+ 360+ 8ED5 ED 5B 2B 90  	ld		de, (PROGR_PERC)
+ 361+ 8ED9 CD 1B 89     	call	Div2
+ 362+ 8EDC
+ 363+ 8EDC              	;Display %
+ 364+ 8EDC 11 BC 8F     	ld		de, MsgLinePr
+ 365+ 8EDF 67           	ld		h, a
+ 366+ 8EE0 69           	ld		l, c
+ 367+ 8EE1 CD D2 88     	call	Byte2Txt
+ 368+ 8EE4
+ 369+ 8EE4
+ 370+ 8EE4 2A 20 90     	ld		hl, (CurLine)
+ 371+ 8EE7 11 C8 8F     	ld		de, MsgLineNo
+ 372+ 8EEA CD C7 88     	call	Word2Txt
+ 373+ 8EED
+ 374+ 8EED 11 B3 8F     	ld		de, MsgLine
+ 375+ 8EF0 06 2D        	ld		b, MsgLineLen
+ 376+ 8EF2 CD 3B 8E     	call	PrintStrTxt
+ 377+ 8EF5 D1           	pop		de
+ 378+ 8EF6 ED 53 B0 5C  	ld		(COORDS), DE
+ 379+ 8EFA
+ 380+ 8EFA 21 E0 5A     	ld		hl, 16384 + 6144 + LINE_CNT*32
+ 381+ 8EFD 54           	ld		d, h
+ 382+ 8EFE 5D           	ld		e, l
+ 383+ 8EFF 13           	inc		de
+ 384+ 8F00 3E 28        	ld		a, (5 << 3) | 0
+ 385+ 8F02 77           	ld		(hl), a
+ 386+ 8F03 01 1F 00     	ld		bc, 31
+ 387+ 8F06 ED B0        	ldir
+ 388+ 8F08 C9           	ret
+ 389+ 8F09
+ 390+ 8F09
+ 391+ 8F09              ReplaceChars:
+ 392+ 8F09 E5           	push	hl
+ 393+ 8F0A C5           	push	bc
+ 394+ 8F0B 21 99 8F     		ld		hl, CharReplaceTbl
+ 395+ 8F0E 06 0D        		ld		b, CharReplTblLen
+ 396+ 8F10              ReplaceSGCLoop:
+ 397+ 8F10 BE           		cp		(hl)
+ 398+ 8F11 28 09        		jr		z, ReplaceMatch
+ 399+ 8F13 23           		inc		hl
+ 400+ 8F14 23           		inc		hl
+ 401+ 8F15 10 F9        		djnz	ReplaceSGCLoop
+ 402+ 8F17
+ 403+ 8F17 3E 3F        		ld		a, '?'
+ 404+ 8F19 C1           		pop		bc
+ 405+ 8F1A E1           		pop		hl
+ 406+ 8F1B C9           	ret
+ 407+ 8F1C
+ 408+ 8F1C              ReplaceMatch:
+ 409+ 8F1C 23           		inc		hl
+ 410+ 8F1D 7E           		ld		a, (hl)
+ 411+ 8F1E C1           	pop		bc
+ 412+ 8F1F E1           	pop		hl
+ 413+ 8F20 C9           	ret
+ 414+ 8F21              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ 415+ 8F21
+ 416+ 8F21              	include	"scroll.asm"
+# file opened: scroll.asm
+   1++8F21              ;Scrolling routines for UP/DOWN
+   2++8F21              ;They use 2 tables of pointers of screen cell rows.
+   3++8F21              ;One table has addresses in increasing order, for scroll down,
+   4++8F21              ;the other in decreasing order, for scroll up, so the same
+   5++8F21              ;scroll routine is used in both cases.
+   6++8F21              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+   7++8F21
+   8++8F21              ; Char Down
+   9++8F21              ; Adjusts screen address HL to move eight pixels down on the display.
+  10++8F21              ; enter: HL = valid screen address
+  11++8F21              ; exit : HL = moves one character down
+  12++8F21              ; used : AF, HL
+  13++8F21              GetCellDown:
+  14++8F21 7D           	ld a,l
+  15++8F22 C6 20        	add a,$20
+  16++8F24 6F           	ld l,a
+  17++8F25 D0           	ret nc
+  18++8F26 7C           	ld a,h
+  19++8F27 C6 08        	add a,$08
+  20++8F29 67           	ld h,a
+  21++8F2A C9           	ret
+  22++8F2B
+  23++8F2B              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  24++8F2B              ;Fills the two tables with pointers.
+  25++8F2B              ScrollInit:
+  26++8F2B 21 00 40     	ld		hl, 16384
+  27++8F2E 06 17        	ld		b, LINE_CNT
+  28++8F30              FillScrLinesLoop:
+  29++8F30              FillScrLinesPtr	EQU	$ + 1			;pointer in table
+  30++8F30 22 00 5B     	ld		(SCRLinesDown), hl
+  31++8F33              	;inc. pointer in destination table (of pointers to lines)
+  32++8F33 ED 5B 31 8F  	ld		de, (FillScrLinesPtr)
+  33++8F37 13           	inc		de
+  34++8F38 13           	inc		de
+  35++8F39 ED 53 31 8F  	ld		(FillScrLinesPtr), de
+  36++8F3D CD 21 8F     	call	GetCellDown
+  37++8F40 10 EE        	djnz	FillScrLinesLoop
+  38++8F42
+  39++8F42              	;now fill the table in reverse
+  40++8F42 ED 73 56 8F  	ld		(FillScrLinesSPStore), sp
+  41++8F46 31 5C 5B     	ld		sp, SCRLinesUp + LINE_CNT*2
+  42++8F49 06 17        	ld		b, LINE_CNT
+  43++8F4B 21 00 5B     	ld		hl, SCRLinesDown
+  44++8F4E              FillScrLinesRev:
+  45++8F4E 5E           	ld		e, (hl)
+  46++8F4F 23           	inc		hl
+  47++8F50 56           	ld		d, (hl)
+  48++8F51 23           	inc		hl
+  49++8F52 D5           	push	de
+  50++8F53 10 F9        	djnz	FillScrLinesRev
+  51++8F55              FillScrLinesSPStore	EQU	$ + 1
+  52++8F55 31 00 00     	ld		sp, 0
+  53++8F58 C9           	ret
+  54++8F59
+  55++8F59              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  56++8F59              ScrollUp:
+  57++8F59 21 2E 5B     	ld		hl, SCRLinesUp
+  58++8F5C 18 03        	jr		Scroll
+  59++8F5E
+  60++8F5E              ScrollDown:
+  61++8F5E 21 00 5B     	ld		hl, SCRLinesDown
+  62++8F61
+  63++8F61              Scroll:
+  64++8F61 22 6F 8F     	ld		(ScrollDownPtrDest), hl
+  65++8F64 23           	inc		hl
+  66++8F65 23           	inc		hl
+  67++8F66 22 72 8F     	ld		(ScrollDownPtrSrc), hl
+  68++8F69 0E 16        	ld		c, LINE_CNT - 1
+  69++8F6B
+  70++8F6B              ScrollDownLoop2:
+  71++8F6B 06 04        	ld		b, 4
+  72++8F6D              ScrollDownPtrDest	EQU	$ + 2
+  73++8F6D ED 5B 00 5B  	ld		de, (SCRLinesDown)
+  74++8F71              ScrollDownPtrSrc	EQU	$ + 1
+  75++8F71 2A 02 5B     	ld		hl, (SCRLinesDown + 2)
+  76++8F74
+  77++8F74              ScrollDownLoop:					;copy a single char line
+  78++8F74 C5           	push	bc
+  79++8F75 01 20 00     	ld		bc, 32
+  80++8F78 ED B0        	ldir
+  81++8F7A 2B           	dec		hl
+  82++8F7B 1B           	dec		de
+  83++8F7C 24           	inc		h
+  84++8F7D 14           	inc		d
+  85++8F7E 01 20 00     	ld		bc, 32
+  86++8F81 ED B8        	lddr
+  87++8F83 23           	inc		hl
+  88++8F84 13           	inc		de
+  89++8F85 24           	inc		h
+  90++8F86 14           	inc		d
+  91++8F87 C1           	pop		bc
+  92++8F88 10 EA        	djnz	ScrollDownLoop
+  93++8F8A
+  94++8F8A 0D           	dec		c
+  95++8F8B C8           	ret		z
+  96++8F8C
+  97++8F8C 2A 72 8F     	ld		hl, (ScrollDownPtrSrc)
+  98++8F8F 22 6F 8F     	ld		(ScrollDownPtrDest), hl
+  99++8F92 23           	inc		hl
+ 100++8F93 23           	inc		hl
+ 101++8F94 22 72 8F     	ld		(ScrollDownPtrSrc), hl
+ 102++8F97 18 D2        	jr		ScrollDownLoop2
+# file closed: scroll.asm
+ 417+ 8F99
+ 418+ 8F99              CharReplaceTbl:
+ 419+ 8F99 B3 80        	defb	179, 128
+ 420+ 8F9B B4 81        	defb	180, 129
+ 421+ 8F9D BF 82        	defb	191, 130
+ 422+ 8F9F C0 83        	defb	192, 131
+ 423+ 8FA1 C1 84        	defb	193, 132
+ 424+ 8FA3 C2 85        	defb	194, 133
+ 425+ 8FA5 C3 86        	defb	195, 134
+ 426+ 8FA7 C4 87        	defb	196, 135
+ 427+ 8FA9 C5 88        	defb	197, 136
+ 428+ 8FAB D9 89        	defb	217, 137
+ 429+ 8FAD DA 8A        	defb	218, 138
+ 430+ 8FAF DB 8B        	defb	219, 139
+ 431+ 8FB1 DC 8C        	defb	220, 140
+ 432+ 8FB3              CharReplTblLen EQU	($ - CharReplaceTbl)/2
+ 433+ 8FB3
+ 434+ 8FB3 50 72 6F 67  MsgLine		defb	'Progress:'
+ 434+ 8FB7 72 65 73 73
+ 434+ 8FBB 3A
+ 435+ 8FBC 20 20 20 25  MsgLinePr	defb	'   %; '
+ 435+ 8FC0 3B 20
+ 436+ 8FC2 4C 69 6E 65  			defb	'Line: '
+ 436+ 8FC6 3A 20
+ 437+ 8FC8 20 20 20 20  MsgLineNo	defb	'     ; '
+ 437+ 8FCC 20 3B 20
+ 438+ 8FCF 32 2D 57 72  MsgLineWrap	defb	'2-Wrap '
+ 438+ 8FD3 61 70 20
+ 439+ 8FD6 20 4F 6E     MsgLineWrF	defb	' On'
+ 440+ 8FD9 20 30 2D 45  			defb	' 0-Exit'
+ 440+ 8FDD 78 69 74
+ 441+ 8FE0              MsgLineLen	EQU		$ - MsgLine
+ 442+ 8FE0
+ 443+ 8FE0 20 20 20 20  LineBuf		defb	'                                                                '
+ 443+ 8FE4 20 20 20 20
+ 443+ 8FE8 20 20 20 20
+ 443+ 8FEC 20 20 20 20
+ 443+ 8FF0 20 20 20 20
+ 443+ 8FF4 20 20 20 20
+ 443+ 8FF8 20 20 20 20
+ 443+ 8FFC 20 20 20 20
+ 443+ 9000 20 20 20 20
+ 443+ 9004 20 20 20 20
+ 443+ 9008 20 20 20 20
+ 443+ 900C 20 20 20 20
+ 443+ 9010 20 20 20 20
+ 443+ 9014 20 20 20 20
+ 443+ 9018 20 20 20 20
+ 443+ 901C 20 20 20 20
+ 444+ 9020 00 00        CurLine		defw	0
+ 445+ 9022 00 00        MaxLine		defw	0
+ 446+ 9024 01           WrapFlag	defb	1
+ 447+ 9025 00 00        FileBegin	defw	0
+ 448+ 9027 00 00        FileLen		defw	0
+ 449+ 9029 00 00        FileEnd		defw	0
+ 450+ 902B 00 00        PROGR_PERC	defw	0
+ 451+ 902D
+ 452+ 902D              SCRLinesDown	EQU $5b00
+ 453+ 902D              SCRLinesUp		EQU	SCRLinesDown + LINE_CNT*2
+ 454+ 902D              End:
+ 455+ 902D
+# file closed: txtview.asm
+1112  902D
+1113  902D              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+1114  902D 48 43 20 43  VerMsg1			DEFM	'HC Commander 1.', '0' + $80
+1114  9031 6F 6D 6D 61
+1114  9035 6E 64 65 72
+1114  9039 20 31 2E B0
+1115  903D 67 65 6F 72  VerMsg2			DEFM	'george.chirtoac', 'a' + $80
+1115  9041 67 65 2E 63
+1115  9045 68 69 72 74
+1115  9049 6F 61 63 E1
+1116  904D 40 67 6D 61  VerMsg3			DEFM	'@gmail.com, 202', '3' + $80
+1116  9051 69 6C 2E 63
+1116  9055 6F 6D 2C 20
+1116  9059 32 30 32 B3
+1117  905D 44 69 73 6B  MsgDskInf		DEFM	'Disk Info      ', ' ' + $80
+1117  9061 20 49 6E 66
+1117  9065 6F 20 20 20
+1117  9069 20 20 20 A0
+1118  906D 46 69 6C 65  MsgFileInf		DEFM	'File Info      ', ' ' + $80
+1118  9071 20 49 6E 66
+1118  9075 6F 20 20 20
+1118  9079 20 20 20 A0
+1119  907D 4D 65 73 73  MsgMessages		DEFM	'Messages       ', ' ' + $80
+1119  9081 61 67 65 73
+1119  9085 20 20 20 20
+1119  9089 20 20 20 A0
+1120  908D 31 2D 41 3A  BtnBar			DEFM	'1-A: 2-B: 3-View 4-Prop 5-Copy 6-Ren 7-Attr 8-Del 9-Disk 0-Exi', 't' + $80
+1120  9091 20 32 2D 42
+1120  9095 3A 20 33 2D
+1120  9099 56 69 65 77
+1120  909D 20 34 2D 50
+1120  90A1 72 6F 70 20
+1120  90A5 35 2D 43 6F
+1120  90A9 70 79 20 36
+1120  90AD 2D 52 65 6E
+1120  90B1 20 37 2D 41
+1120  90B5 74 74 72 20
+1120  90B9 38 2D 44 65
+1120  90BD 6C 20 39 2D
+1120  90C1 44 69 73 6B
+1120  90C5 20 30 2D 45
+1120  90C9 78 69 F4
+1121  90CC 44 72 69 76  MsgDrive		DEFM	'Drive   :      '
+1121  90D0 65 20 20 20
+1121  90D4 3A 20 20 20
+1121  90D8 20 20 20
+1122  90DB C1           MsgDriveLet		DEFM	'A' + $80
+1123  90DC 46 69 6C 65  MsgFilesCnt		DEFM	'Files   :'
+1123  90E0 73 20 20 20
+1123  90E4 3A
+1124  90E5 30 30 30 2F  MsgFilesCntNo	DEFM	'000/12', '8' + $80
+1124  90E9 31 32 B8
+1125  90EC 46 72 65 65  MsgFreeSpace	DEFM	'Free KB :'
+1125  90F0 20 4B 42 20
+1125  90F4 3A
+1126  90F5 30 30 30 2F  MsgFreeSpaceNo	DEFM	'000/63', '6' + $80
+1126  90F9 36 33 B6
+1127  90FC 45 72 72 6F  MsgErr			DEFM	'Error code '
+1127  9100 72 20 63 6F
+1127  9104 64 65 20
+1128  9107 30 30 30 3A  MsgErrCode		DEFM	'000:',' ' + $80
+1128  910B A0
+1129  910C 4C 6F 61 64  MsgLoadingPrg	DEFM	'Loading Progra', 'm' + $80
+1129  9110 69 6E 67 20
+1129  9114 50 72 6F 67
+1129  9118 72 61 ED
+1130  911B 4C 6F 61 64  MsgLoadingSCR	DEFM	'Loading SCREEN', '$' + $80
+1130  911F 69 6E 67 20
+1130  9123 53 43 52 45
+1130  9127 45 4E A4
+1131  912A              ;MsgLoadingTXT	DEFM	'Loading TEX', 'T' + $80
+1132  912A 4C 6F 61 64  MsgLoadingCODE	DEFM	'Loading CODE (!', ')' + $80
+1132  912E 69 6E 67 20
+1132  9132 43 4F 44 45
+1132  9136 20 28 21 A9
+1133  913A 44 69 73 6B  MsgFileSzDsk	DEFM	'Disk Len:'
+1133  913E 20 4C 65 6E
+1133  9142 3A
+1134  9143 30 30 30 30  MsgFileSzDskN	DEFM	'00000 ', 'B' + $80
+1134  9147 30 20 C2
+1135  914A 41 74 74 72  MsgFileAttr		DEFM	'Attrib  :'
+1135  914E 69 62 20 20
+1135  9152 3A
+1136  9153 52 2F 4F 2C  MsgFileAttrN	DEFM	'R/O,HI', 'D' + $80
+1136  9157 48 49 C4
+1137  915A 46 69 6C 65  MsgFileType		DEFM	'FileType:'
+1137  915E 54 79 70 65
+1137  9162 3A
+1138  9163 20 20 20 20  MsgFileTypeN	DEFM	'         ', ' ' + $80
+1138  9167 20 20 20 20
+1138  916B 20 A0
+1139  916D 50 72 6F 67  MsgFileTypePrg	DEFM	'Progra', 'm' + $80
+1139  9171 72 61 ED
+1140  9174 42 79 74 65  MsgFileTypeByt	DEFM	'Bytes ', ' ' + $80
+1140  9178 73 20 A0
+1141  917B 53 43 52 45  MsgFileTypeSCR	DEFM	'SCREEN', '$' + $80
+1141  917F 45 4E A4
+1142  9182 43 68 72 2E  MsgFileTypeChrA	DEFM	'Chr.Ar', 'r' + $80
+1142  9186 41 72 F2
+1143  9189 4E 6F 2E 20  MsgFileTypeNoA	DEFM	'No. Ar', 'r' + $80
+1143  918D 41 72 F2
+1144  9190 44 61 74 61  MsgFileTypeText	DEFM	'Data  ', ' ' + $80
+1144  9194 20 20 A0
+1145  9197 4E 2F 41 20  MsgFileTypeUnkn	DEFM	'N/A   ', ' ' + $80
+1145  919B 20 20 A0
+1146  919E 4C 65 6E 67  MsgFileLen		DEFM	'Length  :'
+1146  91A2 74 68 20 20
+1146  91A6 3A
+1147  91A7 36 35 35 33  MsgFileLenN		DEFM	'65535 ', 'B' + $80
+1147  91AB 35 20 C2
+1148  91AE 53 74 61 72  MsgFileStart	DEFM	'Start   :'
+1148  91B2 74 20 20 20
+1148  91B6 3A
+1149  91B7 36 35 35 33  MsgFileStartN	DEFM	'65535 ', ' ' + $80
+1149  91BB 35 20 A0
+1150  91BE 52 65 61 64  MsgReadingExt	DEFM	'Reading heade', 'r' | $80
+1150  91C2 69 6E 67 20
+1150  91C6 68 65 61 64
+1150  91CA 65 F2
+1151  91CC 20 20 20 20  MsgClear		DEFM	'               ', ' ' | $80
+1151  91D0 20 20 20 20
+1151  91D4 20 20 20 20
+1151  91D8 20 20 20 A0
+1152  91DC 44 65 6C 20  MsgDelete		DEFM	'Del file (y/n)', '?' | $80
+1152  91E0 66 69 6C 65
+1152  91E4 20 28 79 2F
+1152  91E8 6E 29 BF
+1153  91EB 53 65 74 20  MsgSetRO		DEFM	'Set R/O (y/n)', '?' | $80
+1153  91EF 52 2F 4F 20
+1153  91F3 28 79 2F 6E
+1153  91F7 29 BF
+1154  91F9 53 65 74 20  MsgSetSYS		DEFM	'Set HID (y/n)', '?' | $80
+1154  91FD 48 49 44 20
+1154  9201 28 79 2F 6E
+1154  9205 29 BF
+1155  9207 4E 61 6D 65  MsgNewFileName	DEFM	'Name,none=abort', ':' | $80
+1155  920B 2C 6E 6F 6E
+1155  920F 65 3D 61 62
+1155  9213 6F 72 74 BA
+1156  9217 43 6F 70 79  MsgCopyFile		DEFM	'Copying to '
+1156  921B 69 6E 67 20
+1156  921F 74 6F 20
+1157  9222 41 BA        MsgCopyFileDrv	DEFM	'A', ':' | $80
+1158  9224 44 69 73 6B  MsgMenu0		DEFM	'Disk options', ':' | $80
+1158  9228 20 6F 70 74
+1158  922C 69 6F 6E 73
+1158  9230 BA
+1159  9231 31 2E 46 6F  MsgMenu1		DEFM	'1.Format disk '
+1159  9235 72 6D 61 74
+1159  9239 20 64 69 73
+1159  923D 6B 20
+1160  923F 41 BA        MsgMenu1Drv		DEFM	'A', ':' | $80
+1161  9241 32 2E 43 6F  MsgMenu2		DEFM	'2.Copy dis', 'k' | $80
+1161  9245 70 79 20 64
+1161  9249 69 73 EB
+1162  924C 33 2E 45 78  MsgMenu3		DEFM	'3.Exit men', 'u' | $80
+1162  9250 69 74 20 6D
+1162  9254 65 6E F5
+1163  9257 46 6F 72 6D  MsgFormat		DEFM	'Formatting '
+1163  925B 61 74 74 69
+1163  925F 6E 67 20
+1164  9262 41 BA        MsgFormatDrv	DEFM	'A', ':' | $80
+1165  9264 30 30 30 20  MsgBlocksLeft	DEFB	'000 blocks lef', 't' | $80
+1165  9268 62 6C 6F 63
+1165  926C 6B 73 20 6C
+1165  9270 65 66 F4
+1166  9273
+1167  9273              	ifndef	_ROM_FNT_
+1168  9273 ~            FontTable:
+1169  9273 ~            	incbin "cpmfnt.bin"
+1170  9273              	endif
+1171  9273              EndCode:
+1172  9273
+1173  9273              ;Unalocated variables
+1174  9273              UnallocStart	EQU		$
+1175  9273              FileCnt			EQU		$						;File counter, 1B
+1176  9273              NameCol			EQU		FileCnt + 1				;Column for file name, 1B
+1177  9273              SelFile			EQU		NameCol + 1 			;Selected file using cursor, 1B
+1178  9273              CursorAddr		EQU		SelFile + 1				;2 B
+1179  9273              LastKey			EQU		CursorAddr + 2			;1 B
+1180  9273              AUCnt			EQU		LastKey + 1				;2 B
+1181  9273              SelFileCache	EQU		AUCnt + 2				;2 B
+1182  9273
+1183  9273
+1184  9273              FileCache		EQU		SelFileCache + 2					;cache table, size = 128 * 25 = 3200
+1185  9273              TrackBuf		EQU		FileCache + MAX_EXT_CNT*CACHE_SZ	;size = 16 * 256 = 4096
+1186  9273              	ifdef	_ROM_FNT_
+1187  9273              FontTable		EQU		TrackBuf + SPT*SECT_SZ + 100
+1188  9273              DataBuf			EQU		FontTable + 872
+1189  9273              	else
+1190  9273 ~            DataBuf			EQU		TrackBuf + SPT*SECT_SZ
+1191  9273              	endif
+1192  9273
+1193  9273              TheEnd			EQU		DataBuf
+1194  9273              FileIdx			EQU		DataBuf
+1195  9273
+1196  9273              	savebin "hccmd.bin", Start, EndCode - Start
+# file closed: hccmd.asm
+
+Value    Label
+------ - -----------------------------------------------------------
+0xB2C9 X TheEnd
+0x9273   EndCode
+0x902D X End
+0x9022 X MaxLine
+0x8FCF X MsgLineWrap
+0x8F74   ScrollDownLoop
+0x8F6B   ScrollDownLoop2
+0x8F72   ScrollDownPtrSrc
+0x8F6F   ScrollDownPtrDest
+0x8F61   Scroll
+0x8F4E   FillScrLinesRev
+0x5B2E   SCRLinesUp
+0x8F56   FillScrLinesSPStore
+0x5B00   SCRLinesDown
+0x8F31   FillScrLinesPtr
+0x8F30   FillScrLinesLoop
+0x8F21   GetCellDown
+0x8F1C   ReplaceMatch
+0x8F10   ReplaceSGCLoop
+0x000D   CharReplTblLen
+0x8F99   CharReplaceTbl
+0x002D   MsgLineLen
+0x8FB3   MsgLine
+0x8FC8   MsgLineNo
+0x8FBC   MsgLinePr
+0x8EB3   GetLineFillLoop
+0x8E90   GetLineFill
+0x8F09   ReplaceChars
+0x8E7C   Valid
+0x8E79   NotValid
+0x8E80   GetLineSkip0D
+0x8E6F   GetLineNext
+0x8E89   GetLineSkip0A
+0x8E5A   GetLineLoop
+0x8E3B   PrintStrTxt
+0x8FE0   LineBuf
+0x8F5E   ScrollDown
+0x8F59   ScrollUp
+0x8E0C   CheckBegin
+0x8FD6   MsgLineWrF
+0x8D9D   NoWrap
+0x9024   WrapFlag
+0x8DAC   Up
+0x8DD7   Down
+0x8D57   GetKey
+0x8D6E   PrintLoop2
+0x8D66   EOF
+0x8E1C   CheckEnd
+0x8E27   PrintLine
+0x8E55   GetLine
+0xB2C9   FileIdx
+0x8EBA   PrintMsg
+0x902B   PROGR_PERC
+0x9020   CurLine
+0x8F2B   ScrollInit
+0x9027   FileLen
+0x9029   FileEnd
+0x9025   FileBegin
+0x5CB0   COORDS
+0x0009   CHAR_TAB
+0x000A   CHAR_LF
+0x000D   CHAR_CR
+0x0040   COL_CNT
+0x0017   LINE_CNT
+0x8CAB   FileCopyLoop
+0x8CC4   CopyFileEnd
+0xB2C9   CopyFileFCBSrc
+0xB2CB   CopyFileFCBDst
+0xB2CD   CopyFileRes
+0xB2CE   CopyFileDMA
+0x8C53 X FileAttribSet
+0x8C22   SetDMA
+0x8C14   WriteFileBlock
+0x8C10   ReadFileBlock
+0x8C0C   CloseFile
+0x8C08   OpenFile
+0x8C04   CreateFile
+0x8BFA   DestroyChannel
+0x8BE4   CreateChannel
+0x8C18   BDOS
+0x8BD3 X RWTSResTmp
+0x8BD2 X RWTSResVolNo
+0x8BCE X RWTSPrmTbl
+0x8BCC X RWTSExtBuf
+0x8BC9 X RWTSSector
+0x8BC7 X RWTSVolNo
+0x8BC5 X RWTSBlockType
+0x8BBC   CopyMsg
+0x8BB0   SearchMsgEnd
+0x8BB9   SaveMsg
+0x8BA7   IF1Paged
+0x8B72   IF1Call
+0x8B6E   ReadHeaderEnd
+0x8B3A   CacheNotFinished
+0x8BD8   BDOSInit
+0x8BDB   BDOSSelectDisk
+0x8AD7   FileReadLoop
+0x8ACB X FileLoadHeader
+0x8ADD   FileLoadNoHeader
+0x8AEB   FileFree
+0x8AA7   MisMatch
+0x8A9F   Compare
+0x8A9D   StrCmp
+0x9264   MsgBlocksLeft
+0x8A54   CopyDiskLoop
+0x8B03   WriteDiskSectors
+0x8A39   WriteFSBlockLoop
+0x8A30   WriteFSBlock
+0x8AF0   ReadDiskSectors
+0x8A26   ReadFSBlockLoop
+0x8A1D   ReadFSBlock
+0x8A0F   ReadUsedBlocksSkip
+0x89F2   ReadUsedBlocksLoop2
+0x8A12   ReadUsedBlocksSkip2
+0x89E2   ReadUsedBlocksLoop
+0x89C5   ReadUsedBlocksList
+0x89BE   CheckAUEnd
+0x89AA   CheckAU
+0x8993   FirstAU
+0x898D   Track0
+0x8978   AU2TS
+0x8BD1   RWTSRes
+0x895C   WriteOneDiskSector
+0x8BC8   RWTSTrack
+0x8BCA   RWTSDMA
+0x8951   ReadOneDiskSector
+0x8BC5   RWTSParams
+0x8BD0   RWTSCmd
+0x8945   RWTS
+0x0A41   LOAD_ADDR
+0x0026 X CH_DMA
+0x0032   CH_DATA
+0x000C   CH_FCB
+0x000B X CH_RW_FLAG
+0x0005 X HDR_PLEN
+0x0004   TEXT_TYPE
+0x0009   SYS_POS
+0x0004   RWTS_CMD_FMT
+0x0002   RWTS_CMD_WRITE
+0x0001   RWTS_CMD_READ
+0x0000 X RWTS_CMD_POS
+0x5C39 X PIP
+0x5C0A X REPPER
+0x5C09   REPDEL
+0x0260   ERRMSG
+0x5CEF   COPIES
+0x5CED   HD11
+0x5CDA   NSTR1
+0x5CDC   FSTR1
+0x5CD6   DSTR1
+0x0024 X FCB_SIZE
+0x0023 X FCB_R2
+0x0022 X FCB_R1
+0x0021 X FCB_R0
+0x0020 X FCB_CR
+0x0010 X FCB_AU
+0x000F X FCB_RC
+0x000E X FCB_S2
+0x000D X FCB_S1
+0x000C X FCB_EX_IDX
+0x0001 X FCB_NAME
+0x0000 X FCB_DRIVE
+0x0020 X EXT_SIZE
+0x001E X EXT_AU7
+0x001C X EXT_AU6
+0x001A X EXT_AU5
+0x0018 X EXT_AU4
+0x0016 X EXT_AU3
+0x0014 X EXT_AU2
+0x0012 X EXT_AU1
+0x0010   EXT_AU0
+0x000F   EXT_RC
+0x000E   EXT_S2
+0x000D   EXT_S1
+0x0001   EXT_NAME
+0x001B X EOF_MARKER
+0x0080 X REC_SZ
+0x0008   SPAL
+0x0008   EXT_AU_CNT
+0x0001   DIR_TRK_CNT
+0x0800   AU_SZ
+0x0002   HEAD_CNT
+0x0050   TRACK_CNT
+0x0002 X DRIVE_B_BAS
+0x0001 X DRIVE_A_BAS
+0x0000 X DRIVE_CUR_BAS
+0x893F   NoAdd
+0x8939   MulLoop
+0x8920   Div2Loop
+0x891B   Div2
+0x8918   NoSub
+0x8911   DivLoop
+0x8905   DivNrLoop
+0x8903   DigitLoop
+0x88F4   Byte2Txt_
+0x88DD   StrippLeading0
+0x88E8   Word2Txt_
+0x88B4   ReadStrPrint
+0x88A4   ReadStrChar
+0x8887   ReadStringLoop
+0x887B   Store
+0x887A   NoTurn
+0x886F   PrintCharLine
+0x885B X PrintChar3
+0x890E   Div
+0x8806   DrawCursorLoop
+0x87E6   DrawVLinesLoop
+0x87F9   PrintChar2
+0x87C4   DrawUpLine
+0x87C6   ChrParam
+0x87B7 X DrawHLine
+0x87A6   DrawLineLoop
+0x87B3   LineDir
+0x87A3   StoreDir
+0x87A1   VertDir
+0x8798   DrawLine
+0x8794   StrClr
+0x8747   GoodChar
+0x88C3   CurrScrAddr
+0xAF61   FontTable
+0x008C X CHR_HALF
+0x008B X CHR_FULL
+0x008A X CHR_UL
+0x0089 X CHR_LR
+0x0088 X CHR_C
+0x0087   CHR_H
+0x0086 X CHR_ML
+0x0085   CHR_UC
+0x0083 X CHR_DL
+0x0082 X CHR_UR
+0x0081 X CHR_MR
+0x0080   CHR_V
+0x007F X CHR_GRID
+0x001A X CHR_EOF
+0x0009 X CHR_TAB
+0x000A X CHR_LF
+0x000D X CHR_CR
+0x000E X KEY_CTRL
+0x000C   KEY_BACKSP
+0x0007 X KEY_ESC
+0x0018 X SCR_LINES
+0x0040 X SCR_COLS
+0x0300   SCR_ATTR_LEN
+0x1800   SCR_PIX_LEN
+0x0007   INK_WHITE
+0x0006 X INK_YELLOW
+0x0005 X INK_CYAN
+0x0004 X INK_GREEN
+0x0003 X INK_MAGENTA
+0x0002 X INK_RED
+0x0001 X INK_BLUE
+0x0000   INK_BLACK
+0x0038 X PAPER_WHITE
+0x0030 X PAPER_YELLOW
+0x0028   PAPER_CYAN
+0x0020 X PAPER_GREEN
+0x0018 X PAPER_MAGENTA
+0x0010 X PAPER_RED
+0x0008   PAPER_BLUE
+0x0000 X PAPER_BLACK
+0x0040 X CLR_BRIGHT
+0x0007   CLR_WHITE
+0x0006   CLR_YELLOW
+0x0005   CLR_CYAN
+0x0004   CLR_GREEN
+0x0003   CLR_MAGENTA
+0x0002   CLR_RED
+0x0001   CLR_BLUE
+0x0000   CLR_BLACK
+0x00FE   PORT_ZX
+0x25AB   CPM_FNT
+0x4000 X HC_VID_BANK0
+0x000B X HC_CFG_CPM
+0x0000 X HC_CFG_BASIC
+0x0004 X HC_CFG_PORT_EN
+0x0000 X HC_CFG_PORT_DIS
+0x0002   HC_CFG_ROM_E000
+0x0000   HC_CFG_ROM_0000
+0x0001   HC_CFG_ROM_CPM
+0x0000   HC_CFG_ROM_BAS
+0x8701   DontInc
+0x86F5   ReadAllHeadersEnd
+0x86E0   AKey
+0x8707   KbdHit
+0x86C5   NextFile
+0x919E   MsgFileLen
+0x915A   MsgFileType
+0x91AE   MsgFileStart
+0x8684   PrintStartStr
+0x91B7   MsgFileStartN
+0x9197   MsgFileTypeUnkn
+0x8676   PrintStart
+0x0007   HDR_LINE
+0x8651   PrintByteStart
+0x8649   PrintProgStart
+0x91A7   MsgFileLenN
+0x8662   NoHeader
+0x9190   MsgFileTypeText
+0x9174   MsgFileTypeByt
+0x917B   MsgFileTypeSCR
+0x8613   NotScr
+0x861E   CheckText
+0x9182   MsgFileTypeChrA
+0x85F6   CheckByte
+0x0002   CHAR_TYPE
+0x9189   MsgFileTypeNoA
+0x85E7   CheckChrArr
+0x0001   NUMB_TYPE
+0x8629   PrepFileLen
+0x86A2   MoveMsg
+0x9163   MsgFileTypeN
+0x916D   MsgFileTypePrg
+0x85D8   CheckNoArr
+0x000B   CACHE_FIRST_AU
+0x8659   HeadNotRead
+0x914A   MsgFileAttr
+0x85A9   AttrEnd
+0x859D   NotSYS
+0x8589   CheckSys
+0x8577   NotRO
+0x9153   MsgFileAttrN
+0x0008   RO_POS
+0x0000   CACHE_NAME
+0x866B   PrintStartNotRead
+0x913A   MsgFileSzDsk
+0x8545   MultKb
+0x9143   MsgFileSzDskN
+0x8D33   PrintLoop
+0x8CD9   InitViewer
+0x8B78   LoadProgram
+0x910C   MsgLoadingPrg
+0x0000   HC_CFG_VID_4000
+0x007E   HC_CFG_PORT
+0x0008   HC_CFG_VID_C000
+0xC000   HC_VID_BANK1
+0x911B   MsgLoadingSCR
+0x0003   HDR_ADDR
+0x8AEB   FileLoadEnd
+0x5B00   PRN_BUF
+0x8AAA   FileLoad
+0x912A   MsgLoadingCODE
+0x84BA X HandleFileCODE
+0x84E3   HandleFileSCR
+0x1B00   SCR_LEN
+0x0001   HDR_LEN
+0x8511   HandleFileText
+0x0003   BYTE_TYPE
+0x8501   HandleFileProg
+0x0000   PROG_TYPE
+0x0000   HDR_TYPE
+0x0010   CACHE_HDR
+0x000F   CACHE_FLAG
+0x0020   EXT_SZ
+0x000D   CACHE_AU_CNT
+0x8484   FindExtEnd
+0x8B2F   FindCache
+0x8493   GetFileNamesEnd
+0x005C   LST_MAX_FILES
+0x0009   HDR_SZ
+0x845F   FindExt
+0x000C   EXT_IDX
+0x8996   CheckExtAlloc
+0x8486   NextExt
+0x0000   EXT_DEL_FLAG
+0x8406   StoreFilenamesLoop
+0x0080   MAX_EXT_CNT
+0x83ED   DisplayFilenamesLoop
+0x83E6 X DisplayFilenames
+0x83DC   LineOK
+0x5CB1   LINE
+0x5CB0   COL
+0x8843   PrintChar
+0x5C81   CODE
+0x83B6   DispLoop
+0x83B4   DisplayFilename
+0x880B   MoveCursor
+0x8A43   CopyDisk
+0x8398   FormatDiskOK
+0x8967   FormatDisk
+0x9257   MsgFormat
+0x839A   CheckExtra2
+0x83A3   ExtraMenuExit
+0x924C   MsgMenu3
+0x9241   MsgMenu2
+0x9231   MsgMenu1
+0x832D   CheckKeyExtraMenu
+0x9262   MsgFormatDrv
+0x923F   MsgMenu1Drv
+0x9224   MsgMenu0
+0x83A6   CheckKeyExit
+0x8C32   ChangeFileAttrib
+0x8303   AttrChange
+0x91F9   MsgSetSYS
+0x82EB   CheckSYS
+0x91EB   MsgSetRO
+0x8312   CheckKeyExtra
+0x8C26   DeleteFile
+0x82C4   DoFileDelete
+0x91DC   MsgDelete
+0x82D1   CheckKeyAttrib
+0x8C5C   RenameFile
+0x8292   RenameCanceled
+0x8881   ReadString
+0x000B   NAMELEN
+0x9207   MsgNewFileName
+0x82A0   CheckKeyDel
+0x8516   ViewFile
+0x8251   CheckKeyRename
+0x0001   DRIVE_B_CPM
+0x8247   CheckKeyView
+0x830C   SelectDrive
+0x823E   CheckKeyDriveB
+0x86A8   ReadAllHeaders
+0x8235   CheckKeyDriveA
+0x8228   CopyFileOK
+0x8C7F   CopyFile
+0x9217   MsgCopyFile
+0x9222   MsgCopyFileDrv
+0x822B   CheckKeyFileInfo
+0x91CC   MsgClear
+0x8B40   ReadFileHeader
+0x91BE   MsgReadingExt
+0x81EE   CheckKeyCopy
+0x8494   HandleFile
+0x81CA   CheckKeyInfo
+0x000D   KEY_ENTER
+0x81BF   CheckEnter
+0x0008   KEY_LEFT
+0x0017   LST_LINES_CNT
+0x81AE   CheckLeft
+0x0009   KEY_RIGHT
+0x8198   CheckRight
+0x000B   KEY_UP
+0x83AE   MoveIt
+0x8187   CheckUp
+0x000A   KEY_DOWN
+0x9278   LastKey
+0x8533   DisplayFileInfo
+0x927B   SelFileCache
+0x927D   FileCache
+0x892E   Mul
+0x0019   CACHE_SZ
+0x8155   CalcFileCache
+0x90EC   MsgFreeSpace
+0x88C7   Word2Txt
+0x90F5   MsgFreeSpaceNo
+0x013E   MAX_FREE_AU_CNT
+0x90DC   MsgFilesCnt
+0x90E5   MsgFilesCntNo
+0x90CC   MsgDrive
+0x90DB   MsgDriveLet
+0x8B91   SetFastKeys
+0x8800   DrawCursor
+0x0028   SCR_SEL_CLR
+0x9279   AUCnt
+0x5CB0   LineCol
+0x907D   MsgMessages
+0x0007   LST_FILE_INFO
+0x906D   MsgFileInf
+0x0003   LST_DISK_INFO
+0x905D   MsgDskInf
+0x904D   VerMsg3
+0x903D   VerMsg2
+0x8740   PrintStr
+0x902D   VerMsg1
+0x908D   BtnBar
+0x0028   SCR_LBL_CLR
+0x87E1   DrawVLines
+0x0084   CHR_DC
+0x8720   ClrScr
+0x9276   CursorAddr
+0x88C5   CurrScrAttrAddr
+0x0000   LST_FIRST_LINE
+0x0020   SCR_BYTES_PER_LINE
+0x9274   NameCol
+0x0010   LST_FIRST_COL
+0x9273   FileCnt
+0x9275   SelFile
+0xB2C9   DataBuf
+0x8B9C   GetErrMsg
+0x5C3A   ERRNR
+0x8054   HCRunEnd
+0x8166   ReadKeyLoop
+0x810C   DisplayDiskInfo
+0x83FD   GetFileNames
+0x808C   InitUI
+0x8BC6   RWTSDrive
+0x0000   DRIVE_A_CPM
+0x8704   ReadChar
+0x8768   PrintStrClr
+0x0080   CLR_FLASH
+0x000F   SCR_DEF_CLR
+0x000D   LST_LINE_MSG
+0x90FC   MsgErr
+0x88D2   Byte2Txt
+0x9107   MsgErrCode
+0x8048   HCRunMain
+0x8B16   ReadCatalogTrack
+0x00E5   DEL_MARKER
+0x0100   SECT_SZ
+0x0010   SPT
+0x9EFD   TrackBuf
+0x9273   UnallocStart
+0x8012   HCRunInitDisk
+0x805A   ErrorHandler
+0x5C3D   ERRSP
+0x8942   IF1Init
+0x870A   InitFonts
+0x8000   Start
+0x8000   RUN_ADDR
