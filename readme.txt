@@ -17,11 +17,12 @@ Options:
   - 1 - Format current disk
   - 2 - Copy disk: efficient disk copy, only occupied disk area is copied, from A: to B: or vice versa
   - 3 - Exit disk menu
-0 - Exit program to BASIC, without reset. RUN will re-execut program.
+0 - Exit program to BASIC, without reset. RUN will re-execute program.
 Enter - Process selected file:
       - Program files are executed
 	  - Byte files are also executed, using the start address for execution, which might not be the case, so it can cause a crash.
-	  - Text files are listed.
+      - Text files are listed
+	  - SCREEN$ files are displayed.
 Cursor - move selection on screen
 Space - continuously read file headers for all files on disk.
 
@@ -33,6 +34,14 @@ Known issues:
 - By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives work, but errors can be encountered
 when accesing the second hald of the disk. There is a strap on the IF1 board that can enable 3.5 drives (80 tracks). Using a Kempston
 interface also has the same effect.
+
+How it can be used:
+- Use the included HCCMD.tap tape image file with a program that can play tape images on PC/smart phone, like HCDisk, PlayTZX, Tapir.
+It should run fine on these computer models: HC-2000 and HC-91, HC-90, HC-85 with IF1.
+- Write the included HCCMD.DSK disk image to a floppy disk using HCDisk, found here: https://sites.google.com/site/georgechirtoaca/projects?authuser=0 .
+- Use a floppy disk emulator like GoTek with HC and transfer the HCCMD.DSK disk image on a USB stick.
+- Use the Fuse emulator version for HC-2000 by Alex Badea with the HCCMD.DSK disk image. The emulator can be found here: https://sites.google.com/site/georgechirtoaca/projects?authuser=0 .
+- Use the HC-2000 emulator by Rares Atodiresei, for the Spectaculator emulator, found here: https://sites.google.com/site/georgechirtoaca/projects?authuser=0 .
 
 Planned features:
 - File and disk copy to work with single drive setup too, by alternating source/destination disks.
