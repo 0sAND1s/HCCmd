@@ -1,19 +1,32 @@
 	DEVICE ZXSPECTRUM48
 
-RUN_ADDR		EQU	32768
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;Define bellow is commented out to include the font binary in RAM, to make it work with Spectaculator HC-2000 emulator by Rares Atodiresei, which doesn't seem to implement the paging. 
+;Define bellow is commented out to include the font binary in RAM, to make it work with Spectaculator HC-2000 emulator, which doesn't seem to implement the paging. 
 ;If not commented out, it will use the font table in the CPM ROM and the binary will be smaller.
-	define  _ROM_FNT_
-	
-	org RUN_ADDR
+	;DEFINE  _ROM_FNT_
 
-Start:
-	ifdef _ROM_FNT_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
-	call InitFonts
-	endif
+;When inserting IF1 variables, our program moves, corrupting our code. 
+;So we have to put our code after the program as loaded in RAM, hence 32768.	
+	ORG 32768 - (Start - Mover)
+	
+;Move code to execution address.	
+Mover:	
+	ld		hl, EndCode - Mover - 1
+	add		hl, bc
+	ld		de, EndCode - 1
+	ld		bc, EndCode - Start
+	lddr
+	;Clear variables, to not move our binary on IF1 variable insert
+	;ld		hl, ($5C53)
+	;ld		hl, Start			;default free space
+	;ld		($5CB2), hl			;STK free
+	jp		Start
+
+Start:	
+	IFDEF _ROM_FNT_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
+		call InitFonts
+	ENDIF
 	call IF1Init
 
 	;install error handler
@@ -215,7 +228,6 @@ ReadKeyLoop:
 	call	DisplayFileInfo
 
 	call	ReadChar
-	ld		(LastKey), a
 
 	cp		KEY_DOWN
 	jr		nz, CheckUp
@@ -294,7 +306,7 @@ CheckKeyCopy:
 	ld 		a, (RWTSDrive)
 	inc		a
 	xor		%11
-	add		'A'-1
+	add		'A' - 1
 	ld		(MsgCopyFileDrv), a
 	ld		hl, MsgCopyFile
 	ld		de, LST_LINE_MSG + 1 << 8
@@ -419,12 +431,12 @@ CheckKeyAttrib:
 
 CheckSYS:	
 	push	de
-	ld		hl, MsgSetSYS
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	call	ReadChar
-	cp		'y'
+		ld		hl, MsgSetSYS
+		ld		de, LST_LINE_MSG + 2 << 8
+		ld		a, SCR_DEF_CLR | CLR_FLASH
+		call	PrintStrClr
+		call	ReadChar
+		cp		'y'
 	pop		de
 	jr		nz, AttrChange
 	ld		a, %10
@@ -451,6 +463,7 @@ CheckKeyExtra:
 	add		'A'
 	ld		(MsgMenu1Drv), a
 	ld		(MsgFormatDrv), a
+	ld		(MsgMenu2Drv), a
 	
 CheckKeyExtraMenu:
 	ld		hl, MsgMenu1
@@ -489,7 +502,7 @@ CheckKeyExtraMenu:
 	
 	call	FormatDisk
 	or		a
-	jr		z, FormatDiskOK
+	jp		z, HCRunInitDisk
 
 	;Display error for format
 	ld		l, a
@@ -501,9 +514,7 @@ CheckKeyExtraMenu:
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadChar
-	
-FormatDiskOK:	
-	jr		ExtraMenuExit
+	jp		HCRunInitDisk
 	
 CheckExtra2:	
 	cp		'2'
@@ -749,9 +760,9 @@ HandleFileCODE:
 		call	PrintStrClr
 
 		;Copy file load function to printer buffer to not be overwritten by CODE block.
-		ld		hl, FileLoad
+		ld		hl, IF1FileLoad
 		ld		de, PRN_BUF
-		ld		bc, FileLoadEnd - FileLoad
+		ld		bc, IF1FileLoadEnd - IF1FileLoad
 		ldir
 		ld		a, $C9
 		ld		(de), a				;put a RET here, since FileFree won't be called.
@@ -776,22 +787,24 @@ HandleFileSCR:
 
 	pop		hl
 	
-	ifdef _ROM_FNT_
-	;Load to alternate SCREEN$ memory
-	ld		de, HC_VID_BANK1
-	call	FileLoad
-	;Set display to alternate SCREEN$ memory
-	ld		a, HC_CFG_VID_C000
-	out 	(HC_CFG_PORT), a
-	call	ReadChar
-	;Set back to regular SCREEN$ memory
-	ld		a, HC_CFG_VID_4000
-	out 	(HC_CFG_PORT), a
-	else
-	ld		de, 16384
-	call	FileLoad
-	call	ReadChar
-	endif
+	IFDEF _ROM_FNT_
+		;Load to alternate SCREEN$ memory
+		ld		de, HC_VID_BANK1
+		call	IF1FileLoad
+		
+		;Set display to alternate SCREEN$ memory
+		ld		a, HC_CFG_VID_C000
+		out 	(HC_CFG_PORT), a
+		call	ReadChar
+		
+		;Set back to regular SCREEN$ memory
+		ld		a, HC_CFG_VID_4000
+		out 	(HC_CFG_PORT), a	
+	ELSE
+		ld		de, HC_VID_BANK0
+		call	IF1FileLoad
+		call	ReadChar
+	ENDIF
 	
 	ret
 
@@ -807,18 +820,16 @@ HandleFileProg:
 
 HandleFileText:
 	pop		hl
-	call	ViewFile
-	ret
 
 
 ViewFile:
 	call	ClrScr
 	ld		hl, (SelFileCache)
-	ld		de, DataBuf + 2048
+	ld		de, FileData			;File buffer, after the index
 	
 	push	de
 		push	de
-			call	FileLoad		;DE = last addr.
+			call	IF1FileLoad		;DE = last addr.
 			ex		de, hl
 		pop		de
 		or		a
@@ -911,11 +922,11 @@ AttrEnd:
 	push	ix
 		ld		a, (ix + CACHE_FLAG)
 		or		a
-		jp		z, HeadNotRead
+        jp		z, HeadNotRead
 
 		ld		a, (ix + CACHE_FIRST_AU)
 		or		(ix + CACHE_FIRST_AU + 1)
-		jp		z, HeadNotRead
+        jp		z, HeadNotRead		
 
 		ld		a, (ix + CACHE_HDR)
 		cp		PROG_TYPE
@@ -960,7 +971,7 @@ CheckByte:
 		call	MoveMsg
 		jr		PrepFileLen
 NotScr:
-		ld		hl, MsgFileTypeByt
+		ld		hl, MsgFileTypeByte
 		ld		de, MsgFileTypeN
 		call	MoveMsg
 		jr		PrepFileLen
@@ -999,17 +1010,16 @@ PrintByteStart:
 		ld		h, (ix + CACHE_HDR + HDR_ADDR + 1)
 		jr		PrintStart
 
-
 HeadNotRead:
-		ld		hl, MsgFileTypeUnkn
-		ld		de, MsgFileTypeN
-		call	MoveMsg
-
+        ld        hl, MsgFileTypeUnkn
+        ld        de, MsgFileTypeN
+        call    MoveMsg		
+		
 NoHeader:
 		ld		hl, MsgFileTypeUnkn
 		ld		de, MsgFileLenN
 		call	MoveMsg
-
+		
 PrintStartNotRead:
 		ld		hl, MsgFileTypeUnkn
 		ld		de, MsgFileStartN
@@ -1104,10 +1114,10 @@ DontInc:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	include "hccfg.asm"
-	include "ui.asm"
-	include "math.asm"
 	include "disk.asm"
-	include "bdos.asm"
+	include "bdos.asm"	
+	include "ui.asm"
+	include "math.asm"	
 	include "txtview.asm"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1128,7 +1138,6 @@ MsgErr			DEFM	'Error code '
 MsgErrCode		DEFM	'000:',' ' + $80
 MsgLoadingPrg	DEFM	'Loading Progra', 'm' + $80
 MsgLoadingSCR	DEFM	'Loading SCREEN', '$' + $80
-;MsgLoadingTXT	DEFM	'Loading TEX', 'T' + $80
 MsgLoadingCODE	DEFM	'Loading CODE (!', ')' + $80
 MsgFileSzDsk	DEFM	'Disk Len:'
 MsgFileSzDskN	DEFM	'00000 ', 'B' + $80
@@ -1137,7 +1146,7 @@ MsgFileAttrN	DEFM	'R/O,HI', 'D' + $80
 MsgFileType		DEFM	'FileType:'
 MsgFileTypeN	DEFM	'         ', ' ' + $80
 MsgFileTypePrg	DEFM	'Progra', 'm' + $80
-MsgFileTypeByt	DEFM	'Bytes ', ' ' + $80
+MsgFileTypeByte	DEFM	'Bytes ', ' ' + $80
 MsgFileTypeSCR	DEFM	'SCREEN', '$' + $80
 MsgFileTypeChrA	DEFM	'Chr.Ar', 'r' + $80
 MsgFileTypeNoA	DEFM	'No. Ar', 'r' + $80
@@ -1158,7 +1167,8 @@ MsgCopyFileDrv	DEFM	'A', ':' | $80
 MsgMenu0		DEFM	'Disk options', ':' | $80
 MsgMenu1		DEFM	'1.Format disk '
 MsgMenu1Drv		DEFM	'A', ':' | $80
-MsgMenu2		DEFM	'2.Copy dis', 'k' | $80
+MsgMenu2		DEFM	'2.Copy disk '
+MsgMenu2Drv		DEFM	'A', ':' | $80
 MsgMenu3		DEFM	'3.Exit men', 'u' | $80
 MsgFormat		DEFM	'Formatting '
 MsgFormatDrv	DEFM	'A', ':' | $80
@@ -1176,21 +1186,39 @@ FileCnt			EQU		$						;File counter, 1B
 NameCol			EQU		FileCnt + 1				;Column for file name, 1B
 SelFile			EQU		NameCol + 1 			;Selected file using cursor, 1B
 CursorAddr		EQU		SelFile + 1				;2 B
-LastKey			EQU		CursorAddr + 2			;1 B
-AUCnt			EQU		LastKey + 1				;2 B
+AUCnt			EQU		CursorAddr + 2			;2 B
 SelFileCache	EQU		AUCnt + 2				;2 B
 
 
-FileCache		EQU		SelFileCache + 2					;cache table, size = 128 * 25 = 3200
-TrackBuf		EQU		FileCache + MAX_EXT_CNT*CACHE_SZ	;size = 16 * 256 = 4096
-	ifdef	_ROM_FNT_
-FontTable		EQU		TrackBuf + SPT*SECT_SZ + 100		;TBD: Font table gets partialy overwritten by TrackBuf
-DataBuf			EQU		FontTable + 872
-	else
+FileCache		EQU		SelFileCache + 2					;cache table, size = 92 * 25 = 2300
+	IFDEF	_ROM_FNT_
+FontTable		EQU		FileCache + LST_MAX_FILES*CACHE_SZ
+TrackBuf		EQU		FontTable + 872						;size = 16 * 256 = 4096	
+	ELSE
+TrackBuf		EQU		FileCache + LST_MAX_FILES*CACHE_SZ	;size = 16 * 256 = 4096		
+	ENDIF
 DataBuf			EQU		TrackBuf + SPT*SECT_SZ
-	endif
+
+CopyFileFCBSrc	EQU	DataBuf
+CopyFileFCBDst	EQU	DataBuf + 2
+CopyFileResRead	EQU DataBuf + 4
+CopyFileResWrite EQU DataBuf + 5
+CopyFileDMAAddr	EQU	DataBuf + 6
+CopyFileDMA		EQU	DataBuf + 8
 
 TheEnd			EQU		DataBuf
 FileIdx			EQU		DataBuf
-	
-	savebin "hccmd.bin", Start, EndCode - Start
+FileData		EQU		DataBuf + 2048
+
+;Copy buffer size
+;We can use up to about 30KB free space if we load at address 24000.
+;but that requires distinct BASIC loader, meaning 2 files, wasted disk space and higher initial loading time.
+;Testing with 15KB vs 25KB didn't show a big difference, around 2 seconds for total time of 42 seconds, for a 40KB file copy.
+MAX_KB_FREE		EQU		15 * 1024
+MAX_AU_RAM		EQU		MAX_KB_FREE/AU_SZ
+MAX_SECT_RAM	EQU		MAX_KB_FREE/SECT_SZ
+
+UsedBlockListCnt	EQU	DataBuf
+UsedBlockListBlk	EQU	DataBuf + 2
+UsedBlockListSz		EQU 320 * 2
+CopyDiskBuf			EQU DataBuf + 2 + UsedBlockListSz

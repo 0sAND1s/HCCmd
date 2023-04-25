@@ -257,10 +257,10 @@ CheckAUEnd:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Input: TrackBuffer
-;Output: DataBuf = used block count (2 bytes), used block numbers (2 bytes each)
+;Output: DataBuf = used block count (2 bytes), used block numbers (2 bytes each), 640 + 2 bytes
 ReadUsedBlocksList:
 	ld		ix, TrackBuf			;source buffer
-	ld		hl, DataBuf 			;destination buffer
+	ld		hl, UsedBlockListCnt 	;destination buffer
 	ld		bc, MAX_FREE_AU_CNT		;loop counter
 	ld		de, 2					;counter of used blocks, start with 2
 	ld		(hl), e
@@ -284,7 +284,7 @@ ReadUsedBlocksList:
 ReadUsedBlocksLoop:	
 	xor		a
 	cp		(ix)
-	jr		nz, ReadUsedBlocksSkip2;skip dir entry because it's not valid
+	jr		nz, ReadUsedBlocksSkip2;skip dir entry because it's not for user code 0
 	
 	push	ix
 	push	bc
@@ -307,9 +307,9 @@ ReadUsedBlocksLoop2:
 		inc		ix
 		inc		ix
 		
-		ld		de, (DataBuf)
+		ld		de, (UsedBlockListCnt)
 		inc		de
-		ld		(DataBuf), de
+		ld		(UsedBlockListCnt), de
 		
 		djnz	ReadUsedBlocksLoop2
 		
@@ -341,14 +341,7 @@ ReadFSBlock:
 	ld		b, SPAL
 
 ReadFSBlockLoop:	
-	call	ReadDiskSectors
-	or		a
-	ret		nz
-	
-	inc		h				;+256 bytes
-	inc		d				;+1 sector
-	djnz	ReadFSBlockLoop
-	
+	call	ReadDiskSectors	
 	ret
 
 
@@ -365,36 +358,18 @@ WriteFSBlock:
 
 WriteFSBlockLoop:	
 	call	WriteDiskSectors
-	or		a
-	ret		nz
-	
-	inc		h				;+256 bytes
-	inc		d				;+1 sector
-	djnz	WriteFSBlockLoop
-	
-	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;Copies the catalog track and the allocated blocks from one disk to another.
+;Copies the allocated blocks from one disk to another.
+;TODO: Sort blocks to minimize seek time and improve copy speed.
 CopyDisk:
 	;Get list of used blocks in current disk, stored in DataBuf, max 632 bytes
 	call	ReadUsedBlocksList
-	
-	ld		bc, (DataBuf)		;block count, max 318
-	ld		a, b
-	or		c
-	ret		z
-	
-	ld		ix, DataBuf + 2
-	ld		de, DataBuf + 632
+	ld		ix, UsedBlockListBlk	
 	
 CopyDiskLoop:	
-	push	bc
-	push	de
-	
-	ld		l, c
-	ld		h, b
+	ld		hl, (UsedBlockListCnt)		;block count, max 320, 2 for catalog
 	ld		de, MsgBlocksLeft
 	call	Byte2Txt
 	ld		hl, MsgBlocksLeft
@@ -402,39 +377,88 @@ CopyDiskLoop:
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
-	pop		de
-	pop		bc
-	push	bc
-	push	de
+	;Calculate how many blocks to read = min(MAX_AU_RAM, blocks left)
+	ld		hl, MAX_AU_RAM
+	ld		bc, (UsedBlockListCnt)
+	or		a
+	sbc		hl, bc
+	jr		nc, CopyDiskLoopRead		
+	ld		bc, MAX_AU_RAM
+
+CopyDiskLoopRead:		
+	ld		b, c
+	ld		de, CopyDiskBuf
+	;save initial counter and initial block number array position
+	push	bc	
+	push	ix		
 	
+CopyDiskLoopReadLoop:		
 		ld		l, (ix)
 		ld		h, (ix+1)
-		call	ReadFSBlock			;Stop on error?
+		inc		ix
+		inc		ix
 		
-	pop		de
-	push	de
+		push	de
+		push	bc		
+			call	ReadFSBlock			;Stop on error or continue?
+		pop		bc
+		pop		de
+		
+		;+2048
+		ld		a, d
+		add		8
+		ld		d, a
+				
+		djnz	CopyDiskLoopReadLoop
+				
 		;alternate drive
 		ld		a, (RWTSDrive)
 		xor		%11
 		ld		(RWTSDrive), a
 
+	;restore initial counter and initial block number array position
+	pop		ix
+	pop		bc
+	ld		de, CopyDiskBuf
+	push	bc
+	
+CopyDiskLoopWriteLoop:
 		ld		l, (ix)
 		ld		h, (ix+1)
-		call	WriteFSBlock		;Stop on error?
+		inc		ix
+		inc		ix
 		
-		;alternate drive
+		push	de
+		push	bc
+			call	WriteFSBlock		;Stop on error or continue?
+		pop		bc
+		pop		de	
+		
+		;+2048
+		ld		a, d
+		add		8
+		ld		d, a
+		
+		djnz	CopyDiskLoopWriteLoop
+		
+		;alternate drive again
 		ld		a, (RWTSDrive)
 		xor		%11
 		ld		(RWTSDrive), a
-	pop		de
+
 	pop		bc
-	inc		ix
-	inc		ix
+	ld		c, b
+	ld		b, 0
 	
-	dec		bc
-	ld		a, b
-	or		c
-	jr		nz, CopyDiskLoop
+	;Decrease number of blocks read by now.
+	ld		hl, (UsedBlockListCnt)
+	or		a
+	sbc		hl, bc
+	ld		(UsedBlockListCnt), hl
+		
+	ld		a, l
+	or		h
+	jp		nz, CopyDiskLoop
 	
 	ret
 
@@ -460,9 +484,11 @@ MisMatch:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;Read a file into a buffer, sector by sector
+;Read a file into a buffer, sector by sector.
+;It's relocatable, to moved and be used when loading a CODE block.
+;It's not using BDOS, but using similar calls provided by IF1.
 ;In: HL = Name address, DE = buffer
-FileLoad:
+IF1FileLoad:
 	push	de
 		ld (FSTR1), hl
 		ld h, 0
@@ -508,7 +534,7 @@ FileLoadNoHeader:
 	ldir
 	jr		FileReadLoop
 ;Copy routine without FileFree as it messes the buffers, probably moves up variables.
-FileLoadEnd:
+IF1FileLoadEnd:
 
 FileFree:
 	push	de
@@ -572,7 +598,7 @@ ReadCatalogTrack:
 	or   a
 	ret  nz
 	
-	;Sync BDOS disk, to avoid disk R/O error on disk change
+	;Sync with BDOS, to avoid disk R/O error on disk change
 	push  af
 		ld  a, (RWTSDrive)
 		call BDOSSelectDisk
@@ -669,6 +695,7 @@ SetFastKeys:
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Reads the error message string from IF1 ROM.
 GetErrMsg:
 	inc		a
 	ex		af, af'
@@ -710,10 +737,11 @@ CopyMsg:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;RWTS routine I/O block
+;Only drive, track, sector seem to be considered, changing any other parameter doesn't have an effect.
 RWTSParams:
-RWTSBlockType	DEFB	1
+RWTSBlockType	DEFB	1							;?
 RWTSDrive		DEFB	DRIVE_A_CPM					;NOT like BASIC (0,1,2), just 0,1.
-RWTSVolNo		DEFB	0
+RWTSVolNo		DEFB	0							;?
 RWTSTrack		DEFB	0
 RWTSSector		DEFB	0
 RWTSDMA			DEFW	0

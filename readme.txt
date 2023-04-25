@@ -27,13 +27,13 @@ Cursor - move selection on screen
 Space - continuously read file headers for all files on disk.
 
 Known issues:
-- For file copy, the destination file must not exist, or will cause 2 files with the same name. Deleting one file will delete both.
+- For file copy, the destination file is deleted before copying, without confirmation, if it exist already.
 - Format and Disk copy commands don't ask for confirmation.
-- File copy and disk copy only work with dual drive setup currently (A: and B:).
+- File copy and disk copy only work with dual drive setup currently (both A: and B:).
 - The file viewer will load all file into RAM, so trying to view files bigger than about 30KB will cause a crash.
-- By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives work, but errors can be encountered
+- By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives will work, but errors can be encountered
 when accesing the second hald of the disk. There is a strap on the IF1 board that can enable 3.5 drives (80 tracks). Using a Kempston
-interface also has the same effect.
+interface was observed to also has the same effect of enabling 80 tracks for drive B:.
 
 How it can be used:
 - Use the included HCCMD.tap tape image file with a program that can play tape images on PC/smart phone, like HCDisk, PlayTZX, Tapir.

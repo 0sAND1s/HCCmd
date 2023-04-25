@@ -6,8 +6,7 @@
 ;2 disc full,
 ;9 invalid FCB,
 ;10(CP/M) media changed;
-;0FFh hardware error.
-
+;0FFh hardware error.	
 
 	ifndef	_BDOS_
 	define	_BDOS_
@@ -20,33 +19,34 @@ BDOSInit:
 
 
 ;IN: A = Drive to select
-	ifused BDOSSelectDisk
 BDOSSelectDisk:
+	IFUSED
 	ld		ixl, a
 	ld		ixh, 0
 	ld		a, 1
 	jr		BDOS
-	endif
+	ENDIF
 
-	ifused BDOSMakeDiskRO
+
 BDOSMakeDiskRO:
+	IFUSED
 	ld		a, 15
 	jr		BDOS
-	endif
+	ENDIF
 	
 ;Get Read Only flag
 ;OUT: HL = bitflags of R/O drives, A = LSb, P = MSb
-	ifused BDOSGetDiskRO
 BDOSGetDiskRO:
+	IFUSED
 	ld	a, 16
 	jr	BDOS
-	endif
+	ENDIF
 
-	ifused BDOSGetCurrentDisk
 BDOSGetCurrentDisk:
+	IFUSED
 	ld		a, 12
 	jr		BDOS
-	endif
+	ENDIF
 
 
 ;Create a disk channel for BDOS access (does not open the file)
@@ -114,24 +114,24 @@ BDOS:
 
 ;FindFirst
 ;IX=fcb
-	ifused BDOSFindFirst
 BDOSFindFirst:
+	IFUSED
 	ld a, 4
 	jr BDOS
-	endif
+	ENDIF
 
 ;FindNext
 ;IX=fcb
-	ifused BDOSFindNext
 BDOSFindNext:
+	IFUSED
 	ld a, 5
 	jr BDOS
-	endif
+	ENDIF
 	
 
 ;Set DMA address for BDOS
 ;IX=DMA
-SetDMA:
+BDOSSetDMA:
 	ld a, 13
 	jr BDOS
 	
@@ -202,10 +202,6 @@ RenameFile:
 	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CopyFileDMA		EQU	DataBuf + 4+1
-CopyFileRes		EQU DataBuf + 4
-CopyFileFCBDst	EQU	DataBuf + 2
-CopyFileFCBSrc	EQU	DataBuf
 
 ;Will copy a file from A: to B: or vice versa.
 ;HL=source file name
@@ -218,48 +214,83 @@ CopyFile:
 		call 	OpenFile
 		ld		(CopyFileFCBSrc), ix
 	pop hl
-	inc  	a					;Cancel if A==$FF
+	inc  	a						;Cancel if A==$FF
 	jr   	z, CopyFileEnd
 	
 	;Create destination file
 	ld		a, (ix)
-	xor		%11					;Alternate drive, A->B, B-A
+	xor		%11						;Alternate drive, A->B, B-A
+	push	af
+	push	hl
+		call	DeleteFile			;Delete destination file if it exists, like the CP/M guide recommends.
+	pop		hl
+	pop		af
 	call	CreateChannel
 	call 	CreateFile
 	ld		(CopyFileFCBDst), ix
-	inc  	a					;Cancel if A==$FF
-	jr   	z, CopyFileEnd
-	
-	;Set DMA
-	ld		ix, CopyFileDMA
-	call 	SetDMA
-			
-FileCopyLoop:	
-	ld		ix, (CopyFileFCBSrc)
-	call 	ReadFileBlock
-	or		a
-	jr		nz, CopyFileEnd		
+	inc  	a						;Cancel if A==$FF
+	jr   	z, CopyFileEnd	
+
+FileCopyLoop:				
+	ld		b, MAX_SECT_RAM
+	ld		ix, CopyFileDMAAddr
+	ld		(ix), CopyFileDMA % $FF
+	ld		(ix+1), CopyFileDMA / $FF
+FileCopyReadLoop:	
+	push	bc
+		ld		ix, (CopyFileDMAAddr)
+		call 	BDOSSetDMA
+		inc		ixh
+		ld		(CopyFileDMAAddr), ix
+
+		ld		ix, (CopyFileFCBSrc)
+		call 	ReadFileBlock
+		or		a
+		ld		(CopyFileResRead), a
+	pop		bc	
+	jr		nz, FileCopyWrite		
+	djnz	FileCopyReadLoop
 		
-	ld		ix, (CopyFileFCBDst)
-	call	WriteFileBlock
-	or		a
-	ld		(CopyFileRes), a
-	jr		nz, CopyFileEnd
+FileCopyWrite:		
+	ld		ix, CopyFileDMAAddr
+	ld		(ix), CopyFileDMA % $FF
+	ld		(ix+1), CopyFileDMA / $FF	
 	
-	jr		FileCopyLoop
+	;Calculate how many sectors were read.
+	ld		a, MAX_SECT_RAM
+	sub		b
+	ld		b, a
+	
+FileCopyWriteLoop:				
+	push	bc		
+		ld		ix, (CopyFileDMAAddr)
+		call 	BDOSSetDMA
+		inc		ixh
+		ld		(CopyFileDMAAddr), ix
+		
+		ld		ix, (CopyFileFCBDst)
+		call	WriteFileBlock
+		or		a
+		ld		(CopyFileResWrite), a
+	pop		bc	
+	jr		nz, CopyFileEnd		
+	djnz	FileCopyWriteLoop
 		
 CopyFileEnd:
+	;Check if copy loop was stopped because buffer ran out, continue copy in that case. Otherwise, it's file end.	
+	ld		a, (CopyFileResRead)
+	or		a
+	jr		z, FileCopyLoop
+	
 	ld		ix, (CopyFileFCBDst)
-	call 	CloseFile			;close destination file
+	call 	CloseFile				;close destination file
 	call 	DestroyChannel
 	
 	;Don't need to close source file, but must free channel
-	;ld		ix, (CopyFileFCBSrc)
-	;call 	CloseFile			
 	ld		ix, (CopyFileFCBSrc)
 	call 	DestroyChannel
 	
-	ld		a, (CopyFileRes)
+	ld		a, (CopyFileResWrite)
 
 	ret
 
