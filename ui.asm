@@ -125,8 +125,8 @@ KbdHit:
 	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	ifdef _ROM_FNT_
 InitFonts:
+	IFUSED
     ;page-in CPM ROM to get fonts
     di
     ld a, HC_CFG_ROM_CPM
@@ -143,7 +143,7 @@ InitFonts:
     ei
 	
 	ret
-	endif
+	ENDIF
 
 ClrScr:
 	ld		hl, (CurrScrAddr)

@@ -8,21 +8,8 @@
 
 ;When inserting IF1 variables, our program moves, corrupting our code. 
 ;So we have to put our code after the program as loaded in RAM, hence 32768.	
-	ORG 32768 - (Start - Mover)
+	ORG RUN_ADDR
 	
-;Move code to execution address.	
-Mover:	
-	ld		hl, EndCode - Mover - 1
-	add		hl, bc
-	ld		de, EndCode - 1
-	ld		bc, EndCode - Start
-	lddr
-	;Clear variables, to not move our binary on IF1 variable insert
-	;ld		hl, ($5C53)
-	;ld		hl, Start			;default free space
-	;ld		($5CB2), hl			;STK free
-	jp		Start
-
 Start:	
 	IFDEF _ROM_FNT_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
 		call InitFonts
@@ -37,17 +24,22 @@ Start:
 	ld		(ERRSP), sp
 
 HCRunInitDisk:	
-	;Clear file cache
-	ld		hl, UnallocStart
+	;Set track buffer to del marker
+	ld		hl, TrackBuf
 	ld		d, h
 	ld		e, l
 	inc		de
-	ld		bc, TrackBuf - UnallocStart
-	ld		(hl), 0
-	ldir
-	;Set track buffer to del marker
 	ld		bc, SPT*SECT_SZ
 	ld		(hl), DEL_MARKER
+	ldir
+	
+	;Invalidate file cache
+	ld		hl, FileCache
+	ld		d, h
+	ld		e, l
+	inc		de
+	ld		bc, LST_MAX_FILES*CACHE_SZ - 1
+	ld		(hl), 0
 	ldir
 
 	;main program
@@ -1118,7 +1110,7 @@ DontInc:
 	include "bdos.asm"	
 	include "ui.asm"
 	include "math.asm"	
-	include "txtview.asm"
+	include "txtview.asm"	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 VerMsg1			DEFM	'HC Commander 1.', '0' + $80
@@ -1174,10 +1166,10 @@ MsgFormat		DEFM	'Formatting '
 MsgFormatDrv	DEFM	'A', ':' | $80
 MsgBlocksLeft	DEFB	'000 blocks lef', 't' | $80
 
-	ifndef	_ROM_FNT_
+	IFNDEF	_ROM_FNT_
 FontTable:	
 	incbin "cpmfnt.bin"
-	endif
+	ENDIF
 EndCode:
 
 ;Unalocated variables
@@ -1210,15 +1202,19 @@ TheEnd			EQU		DataBuf
 FileIdx			EQU		DataBuf
 FileData		EQU		DataBuf + 2048
 
-;Copy buffer size
-;We can use up to about 30KB free space if we load at address 24000.
-;but that requires distinct BASIC loader, meaning 2 files, wasted disk space and higher initial loading time.
-;Testing with 15KB vs 25KB didn't show a big difference, around 2 seconds for total time of 42 seconds, for a 40KB file copy.
-MAX_KB_FREE		EQU		15 * 1024
-MAX_AU_RAM		EQU		MAX_KB_FREE/AU_SZ
-MAX_SECT_RAM	EQU		MAX_KB_FREE/SECT_SZ
-
 UsedBlockListCnt	EQU	DataBuf
 UsedBlockListBlk	EQU	DataBuf + 2
 UsedBlockListSz		EQU 320 * 2
+;Copy buffer size
 CopyDiskBuf			EQU DataBuf + 2 + UsedBlockListSz
+
+;We can use up to about 30KB free space if we load at address 24000.
+;but that requires distinct BASIC loader, meaning 2 files, wasted disk space and higher initial loading time.
+;Testing with 15KB vs 25KB didn't show a big difference, around 2 seconds for total time of 42 seconds, for a 40KB file copy.
+MAX_RAM_FREE	EQU		$FF00 - DataBuf - 1024
+MAX_AU_RAM		EQU		MAX_RAM_FREE/AU_SZ
+MAX_SECT_RAM	EQU		MAX_RAM_FREE/SECT_SZ
+
+	DISPLAY "DataBuf: ",/D,DataBuf
+	DISPLAY "MAX_RAM_FREE: ",/D,MAX_RAM_FREE
+	DISPLAY "MAX_AU_RAM: ",/D,MAX_AU_RAM	
