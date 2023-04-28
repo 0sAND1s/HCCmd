@@ -816,21 +816,20 @@ HandleFileText:
 
 ViewFile:
 	call	ClrScr
-	ld		hl, (SelFileCache)
-	ld		de, FileData			;File buffer, after the index
-	
-	push	de
-		push	de
-			call	IF1FileLoad		;DE = last addr.
-			ex		de, hl
-		pop		de
-		or		a
-		sbc		hl, de
-		ld		b, h
-		ld		c, l
+	ld		hl, (SelFileCache)	
+	call	ReadFileSection					;DE = last address read
+	ld		hl, FileData
+	;Calculate size of read buffer
+	push	hl
+		ex	de, hl
+		or	a
+		sbc	hl, de
+		ld	b, h
+		ld	c, e
 	pop		hl
 	call	InitViewer
 	call	PrintLoop
+ViewFileEnd:	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -839,19 +838,16 @@ ViewFile:
 DisplayFileInfo:
 	ld		hl, (SelFileCache)
 	push	hl
-		;disk size
+		;disk size - at least 2KB ==1  AU
 		ld		bc, CACHE_AU_CNT
 		add		hl, bc
 		ld		de, (hl)
-		ex		de, hl
+		ex		de, hl				
+		;*2, since one block (AU) is 2KB.
+		rl	l
+		rl	h
+
 		ld		de, MsgFileSzDskN
-
-		ld		b, 11
-MultKb:
-		add		hl, hl
-		djnz	MultKb
-
-
 		call	Word2Txt
 		ld		hl, MsgFileSzDsk
 		ld		de, LST_FILE_INFO + 1 << 8
@@ -971,13 +967,13 @@ NotScr:
 CheckText:
 		ld		hl, MsgFileTypeText
 		ld		de, MsgFileTypeN
-		call	MoveMsg
-		jr		NoHeader
+		call	MoveMsg					
 
 PrepFileLen:
 		;File len
 		ld		l, (ix + CACHE_HDR + HDR_LEN)
 		ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
+PrepFileLenText:		
 		ld		de, MsgFileLenN
 		call	Word2Txt
 		ld		h, 'B' | $80
@@ -989,7 +985,8 @@ PrepFileLen:
 		jr		z, PrintProgStart
 
 		cp		BYTE_TYPE
-		jr		z, PrintByteStart
+		jr		z, PrintByteStart		
+		
 		jr		PrintStartNotRead
 
 PrintProgStart:
@@ -1003,17 +1000,16 @@ PrintByteStart:
 		jr		PrintStart
 
 HeadNotRead:
-        ld        hl, MsgFileTypeUnkn
+        ld        hl, MsgNA
         ld        de, MsgFileTypeN
         call    MoveMsg		
 		
-NoHeader:
-		ld		hl, MsgFileTypeUnkn
+		ld		hl, MsgNA
 		ld		de, MsgFileLenN
 		call	MoveMsg
 		
 PrintStartNotRead:
-		ld		hl, MsgFileTypeUnkn
+		ld		hl, MsgNA
 		ld		de, MsgFileStartN
 		call	MoveMsg
 		jr		PrintStartStr
@@ -1132,7 +1128,7 @@ MsgLoadingPrg	DEFM	'Loading Progra', 'm' + $80
 MsgLoadingSCR	DEFM	'Loading SCREEN', '$' + $80
 MsgLoadingCODE	DEFM	'Loading CODE (!', ')' + $80
 MsgFileSzDsk	DEFM	'Disk Len:'
-MsgFileSzDskN	DEFM	'00000 ', 'B' + $80
+MsgFileSzDskN	DEFM	'00000 ', 'K' + $80
 MsgFileAttr		DEFM	'Attrib  :'
 MsgFileAttrN	DEFM	'R/O,HI', 'D' + $80
 MsgFileType		DEFM	'FileType:'
@@ -1143,7 +1139,7 @@ MsgFileTypeSCR	DEFM	'SCREEN', '$' + $80
 MsgFileTypeChrA	DEFM	'Chr.Ar', 'r' + $80
 MsgFileTypeNoA	DEFM	'No. Ar', 'r' + $80
 MsgFileTypeText	DEFM	'Data  ', ' ' + $80
-MsgFileTypeUnkn	DEFM	'N/A   ', ' ' + $80
+MsgNA			DEFM	'N/A   ', ' ' + $80
 MsgFileLen		DEFM	'Length  :'
 MsgFileLenN		DEFM	'65535 ', 'B' + $80
 MsgFileStart	DEFM	'Start   :'
@@ -1199,9 +1195,15 @@ CopyFileDMAAddr	EQU	DataBuf + 6
 CopyFileDMA		EQU	DataBuf + 8
 
 TheEnd			EQU		DataBuf
-FileIdx			EQU		DataBuf
-FileData		EQU		DataBuf + 2048
 
+;File viewer constants
+FileData		EQU		DataBuf + SECT_SZ		;leave out room for a sector buffer
+;File buffer size, without index
+FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - 3*1024
+;Set a few KB aside for file indexing
+FileIdx			EQU		FileData + FileDataSize
+
+;FS block list constants
 UsedBlockListCnt	EQU	DataBuf
 UsedBlockListBlk	EQU	DataBuf + 2
 UsedBlockListSz		EQU 320 * 2

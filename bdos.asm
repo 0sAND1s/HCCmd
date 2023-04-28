@@ -8,8 +8,8 @@
 ;10(CP/M) media changed;
 ;0FFh hardware error.	
 
-	ifndef	_BDOS_
-	define	_BDOS_
+	IFNDEF	_BDOS_
+	DEFINE	_BDOS_
 
 	include "disk.asm"
 
@@ -135,6 +135,47 @@ BDOSSetDMA:
 	ld a, 13
 	jr BDOS
 	
+	
+;In: HL=filename
+;Out: HL=file size in bytes from the 128-bytes record count returned by the BDOS function.
+GetFileSize:
+	IFUSED
+	
+	ld 		a, (RWTSDrive)
+	inc		a					;Convert to BASIC drive number: 1,2	
+	call	CreateChannel	
+	
+	ld		a, 20
+	call	BDOS		
+	;inc		a
+	;jr		z, GetFileSizeEnd				;This function always returns $FF in A, but the result is OK.
+		
+	ld		l, (ix + FCB_R0)
+	ld		h, (ix + FCB_R1)	
+	
+	;If the file is bigger than $200 * 128 bytes records, we display 0.
+	ld		a, 1
+	cp		h
+	jr		nc, GetFileSizeOK
+	ld		hl, 0
+	jr		GetFileSizeEnd
+	
+GetFileSizeOK:	
+	;*128 == 2^7
+	ld		b, 7
+GetFileSizeMul:	
+	rl		l
+	rl		h
+	djnz	GetFileSizeMul
+
+GetFileSizeEnd:
+	push	hl
+		call	DestroyChannel
+	pop		hl
+
+	ret	
+	ENDIF
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HL=file name, A=drive
 DeleteFile:
@@ -253,8 +294,9 @@ FileCopyReadLoop:
 		
 FileCopyWrite:		
 	ld		ix, CopyFileDMAAddr
-	ld		(ix), CopyFileDMA % $FF
-	ld		(ix+1), CopyFileDMA / $FF	
+	ld		hl, CopyFileDMA
+	ld		(ix), l
+	ld		(ix+1), h
 	
 	;Calculate how many sectors were read.
 	ld		a, MAX_SECT_RAM
@@ -277,7 +319,7 @@ FileCopyWriteLoop:
 	djnz	FileCopyWriteLoop
 		
 CopyFileEnd:
-	;Check if copy loop was stopped because buffer ran out, continue copy in that case. Otherwise, it's file end.	
+	;Check if file ended, if not, continue copying.	
 	ld		a, (CopyFileResRead)
 	or		a
 	jr		z, FileCopyLoop
@@ -294,4 +336,47 @@ CopyFileEnd:
 
 	ret
 
-	endif
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Reads part of a file
+;In: HL = name, DE = file offset in bytes
+;Out: FileData = read buffer, DE = end of file
+ReadFileSection:	
+	ld 		a, (RWTSDrive)
+	inc		a					;Convert to BASIC drive number: 1,2
+	call	CreateChannel
+	call 	OpenFile
+	ld		(CopyFileFCBSrc), ix
+	inc  	a						;Cancel if A==$FF
+	ret		z
+	
+	;Limit max sectors to read to leave space for the index too.
+	ld		b, FileDataSize/SECT_SZ
+	;Set destination memory pointer.
+	ld		ix, CopyFileDMAAddr
+	ld		hl, FileData
+	ld		(ix), l
+	ld		(ix+1), h
+ReadFileSectionLoop:	
+	push	bc
+		ld		ix, (CopyFileDMAAddr)
+		call 	BDOSSetDMA
+		inc		ixh
+		ld		(CopyFileDMAAddr), ix
+
+		ld		ix, (CopyFileFCBSrc)
+		call 	ReadFileBlock
+		or		a
+		ld		(CopyFileResRead), a
+	pop		bc	
+	jr		nz, ReadFileSectionEnd		
+	djnz	ReadFileSectionLoop
+			
+ReadFileSectionEnd:
+	ld		ix, (CopyFileFCBSrc)
+	call 	DestroyChannel
+	
+	ld		de, (CopyFileDMAAddr)
+	dec		d
+	ret
+
+	ENDIF

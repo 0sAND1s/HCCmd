@@ -6,6 +6,7 @@ COL_CNT		EQU	64
 CHAR_CR		EQU	$0D
 CHAR_LF		EQU	$0A
 CHAR_TAB	EQU	$09
+EOF_MARKER		EQU	$1A
 
 COORDS		EQU	23728		;Coordinates
 
@@ -15,7 +16,7 @@ InitViewer:
 	add		hl, bc
 	;must filter any EOF chars, max 256 of them.
 	dec		h
-	ld		a, 0x1A
+	ld		a, EOF_MARKER
 	cpir
 	dec		hl
 	ld		(FileEnd), hl
@@ -24,7 +25,7 @@ InitViewer:
 	sbc		hl, de
 	ld		(FileLen), hl
 
-	ld		a, 0x0D
+	ld		a, CHAR_CR
 	ld		(hl), a
 
 

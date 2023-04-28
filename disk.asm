@@ -45,7 +45,6 @@ MAX_EXT_CNT		EQU	(SPT * DIR_TRK_CNT * SECT_SZ / EXT_SZ);maximum directory entrie
 MAX_FREE_AU_CNT		EQU	((TRACK_CNT * HEAD_CNT - DIR_TRK_CNT) * SPT * SECT_SZ)/AU_SZ ;max free allocation units (318)
 REC_SZ			EQU 128			;cp/m record size
 DEL_MARKER		EQU	$E5
-EOF_MARKER		EQU	$1B
 
 
 ;Extension structure (directory entry)
@@ -643,6 +642,7 @@ ReadFileHeader:
 	ld		a, h
 	or		l
 	jr		z, ReadHeaderEnd
+	
 	call	AU2TS
 	ld		d, b
 	ld		e, c
@@ -652,15 +652,57 @@ ReadFileHeader:
 		call	ReadOneDiskSector
 	pop		hl
 	pop		ix
+	
+	push	hl
+		ld		hl, DataBuf
+		call	IsFileHeaderValid
+	pop		hl
+	or		a
+	jr		z, ReadFileHeaderIsTextFile
+	
 	ld		bc, CACHE_HDR
 	add		hl, bc
 	ex		hl, de
 	ld		hl, DataBuf
 	ld		bc, HDR_SZ
 	ldir
+	
+	;For text files, read file size as reported by BDOS, since we don't have a header.
+	ld		a, BYTE_TYPE
+	cp		(ix + CACHE_HDR + HDR_TYPE)
+	jr		nc, ReadHeaderEnd
+	
+ReadFileHeaderIsTextFile:	
+	push	ix	
+	push	ix
+	pop		hl
+		call	GetFileSize		
+	pop		ix	
+	ld		(ix + CACHE_HDR + HDR_LEN), l
+	ld		(ix + CACHE_HDR + HDR_LEN + 1), h	
+	ld		a, TEXT_TYPE
+	ld		(ix + CACHE_HDR + HDR_TYPE), a
+	
 ReadHeaderEnd:
 	inc		(ix + CACHE_FLAG)
 	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Checks if the file header is valid. For now it checks to not have all 0s.
+;Some text files can be mistakend for Program files, because the first byte is 0 == PROG_TYPE.
+;In: HL = header
+;Out: A > 0 if valid
+IsFileHeaderValid:
+	IFUSED
+	xor		a
+	ld		b, HDR_SZ
+IsFileHeaderValidLoop:		
+	or		(hl)
+	inc		hl
+	djnz	IsFileHeaderValidLoop
+	
+	ret
+	ENDIF
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
