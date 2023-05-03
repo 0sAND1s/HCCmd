@@ -7,7 +7,7 @@
 	;DEFINE  _ROM_FNT_
 
 ;When inserting IF1 variables, our program moves, corrupting our code. 
-;So we have to put our code after the program as loaded in RAM, hence 32768.	
+;So we have to put our code after the program as loaded in RAM.	
 	ORG RUN_ADDR
 	
 Start:	
@@ -45,7 +45,7 @@ HCRunInitDisk:
 	;main program
 	call 	ReadCatalogTrack
 	or		a					;Signal disk read error. On empty drive code 5 is shown.
-	jr		z, HCRunMain
+	jr		z, HCRunCacheFiles
 	
 	ld		l, a
 	ld		h, 0
@@ -58,11 +58,16 @@ HCRunInitDisk:
 	call	ReadChar
 	ld		a, DRIVE_A_CPM		;Reset drive to A in case B was selected but was empty.
 	ld		(RWTSDrive), a
+	jr		HCRunInitDisk
 
+HCRunCacheFiles:
+	call 	GetFileNames		
+	
 HCRunMain:
-	call 	InitUI
-	call 	GetFileNames
-	call	DisplayDiskInfo
+	call 	InitUI	
+	call	PrintIntro	
+	call	DisplayFilenames
+	call	DisplayDiskInfo			
 	jp		ReadKeyLoop
 
 HCRunEnd:
@@ -79,7 +84,7 @@ ErrorHandler:
 	pop		hl
 	ld		(ERRSP), hl
 
-	ld		a, (ERRNR)		;make something with the error code, display the error message maybe.
+	ld		a, (ERRNR)		;Display the error message
 	ld		l, a
 	ld		h, 0
 	ld		de, MsgErrCode
@@ -107,17 +112,18 @@ ErrorHandler:
 
 InitUI:
 	xor		a
-	ld		(SelFile), A
-	ld		(FileCnt), A
+	ld		(SelFile), A	
 	ld		a, LST_FIRST_COL + 1
 	ld		(NameCol), A
+	ld		de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
+	ld		(LineCol), de	
+	
+	call	ClrScr
 
 	ld		hl, SCR_BYTES_PER_LINE * LST_FIRST_LINE + LST_FIRST_COL/2
 	ld		bc, (CurrScrAttrAddr)
 	add		hl, bc
 	ld		(CursorAddr), hl
-
-	call	ClrScr
 
 	ld		a, CHR_DC
 	call	DrawVLines
@@ -125,19 +131,12 @@ InitUI:
 	ld		a, SCR_LBL_CLR
 	ld		de, 23 << 8
 	ld		hl, BtnBar
+	call	PrintStrClr	
+		
+	ld		a, SCR_LBL_CLR
+	ld		hl, MsgSysInf
+	ld		de, LST_PROG_INFO << 8
 	call	PrintStrClr
-
-
-	ld		hl, VerMsg1
-	ld		de, LST_FIRST_LINE << 8
-	call	PrintStr
-	ld		hl, VerMsg2
-	ld		de, LST_FIRST_LINE + 1 << 8
-	call	PrintStr	
-	ld		hl, VerMsg3
-	ld		de, LST_FIRST_LINE + 2 << 8
-	call	PrintStr
-
 
 	ld		a, SCR_LBL_CLR
 	ld		hl, MsgDskInf
@@ -152,13 +151,7 @@ InitUI:
 	ld		a, SCR_LBL_CLR
 	ld		hl, MsgMessages
 	ld		de, LST_LINE_MSG << 8
-	call	PrintStrClr
-
-	ld		de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
-	ld		(LineCol), de
-	ld		hl, AUCnt
-	ld		de, 0
-	ld		(hl), de
+	call	PrintStrClr	
 
 	ld		a, SCR_SEL_CLR
 	call	DrawCursor
@@ -219,7 +212,7 @@ ReadKeyLoop:
 	call	CalcFileCache
 	call	DisplayFileInfo
 
-	call	ReadChar
+	call	ReadChar	
 
 	cp		KEY_DOWN
 	jr		nz, CheckUp
@@ -279,6 +272,11 @@ CheckEnter:
 CheckKeyInfo:
 	cp		'4'
 	jr		nz, CheckKeyCopy
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
+	
 	ld		ix, (SelFileCache)
 	ld		hl, MsgReadingExt
 	ld		de, LST_LINE_MSG + 1 << 8
@@ -293,7 +291,11 @@ CheckKeyInfo:
 	
 CheckKeyCopy:
 	cp		'5'
-	jr		nz, CheckKeyFileInfo
+	jp		nz, CheckKeyFileInfo
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
 	
 	ld 		a, (RWTSDrive)
 	inc		a
@@ -304,7 +306,25 @@ CheckKeyCopy:
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	ld	hl, (SelFileCache)
+	
+	ld		hl, (SelFileCache)
+	ld 		a, (RWTSDrive)
+	inc		a	
+	xor		%11		
+	call	DoesFileExist
+	inc		a	
+	jr		z, CopyFileDestNotExist
+	
+	ld		hl, MsgFileOverwrite
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar
+	cp		'y'
+	jp		nz, CopyFileDontOverwrite
+		
+CopyFileDestNotExist:		
+	ld		hl, (SelFileCache)
 	call	CopyFile
 	or		a
 	jr		z, CopyFileOK
@@ -319,12 +339,26 @@ CheckKeyCopy:
 	call	PrintStrClr
 	call	ReadChar
 	
-CopyFileOK:
+CopyFileOK:		
+CopyFileDontOverwrite:	
+	ld		hl, MsgClear
+	ld		de, LST_LINE_MSG+1 << 8
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
+	ld		hl, MsgClear
+	ld		de, LST_LINE_MSG+2 << 8
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
 	jp		HCRunInitDisk
 
 CheckKeyFileInfo:
 	cp		' '
 	jr		nz, CheckKeyDriveA
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
+	
 	call	ReadAllHeaders
 	jp		ReadKeyLoop
 
@@ -343,12 +377,21 @@ CheckKeyDriveB:
 CheckKeyView:
 	cp		'3'
 	jr		nz, CheckKeyRename
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
+	
 	call	ViewFile
 	jp		HCRunMain
 	
 CheckKeyRename:
 	cp		'6'
 	jr		nz, CheckKeyDel
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
 	
 	ld		hl, MsgNewFileName
 	ld		de, LST_LINE_MSG + 1 << 8
@@ -373,6 +416,24 @@ CheckKeyRename:
 	ld		a, (de)
 	cp		' '					;If starting with space, input was canceled.
 	jp		z, RenameCanceled
+	
+	;Check if new name doesn't exist already. Cancel if so.
+	ld		hl, DataBuf
+	ld 		a, (RWTSDrive)
+	inc		a		
+	call	DoesFileExist
+	inc		a	
+	jr		z, RenameFileNotExist
+
+	ld		hl, MsgFileExists
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar
+	jr		RenameCanceled
+	
+RenameFileNotExist:	
+	ld		de, DataBuf
 	ld		hl, (SelFileCache)
 	call	RenameFile
 	jp		HCRunInitDisk
@@ -382,11 +443,19 @@ RenameCanceled:
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR
 	call	PrintStrClr
+	ld		hl, MsgClear
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
 	jp		ReadKeyLoop
 	
 CheckKeyDel:
 	cp		'8'
 	jr		nz, CheckKeyAttrib
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
 	
 	ld		hl, MsgDelete
 	ld		de, LST_LINE_MSG + 1 << 8
@@ -410,6 +479,10 @@ DoFileDelete:
 CheckKeyAttrib:
 	cp		'7'
 	jr		nz, CheckKeyExtra
+	
+	ld		a, (FileCnt)
+	or		a
+	jp		z, ReadKeyLoop
 	
 	ld		hl, MsgSetRO
 	ld		de, LST_LINE_MSG + 1 << 8
@@ -446,7 +519,8 @@ SelectDrive:
 	
 CheckKeyExtra:
 	cp		'9'
-	jp		nz, CheckKeyExit
+	jp		nz, CheckKeyExit	
+	
 	ld		hl, MsgMenu0
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
@@ -455,18 +529,23 @@ CheckKeyExtra:
 	add		'A'
 	ld		(MsgMenu1Drv), a
 	ld		(MsgFormatDrv), a
-	ld		(MsgMenu2Drv), a
+	ld		(MsgMenu2Drv1), a
+	ld		a, (RWTSDrive)
+	inc		a
+	xor		%11
+	add		'A'-1
+	ld		(MsgMenu2Drv2), a
 	
 CheckKeyExtraMenu:
-	ld		hl, MsgMenu1
+	ld		hl, MsgMenu3
 	ld		de, LST_LINE_MSG + 2 << 8
 	call	PrintStr
-	ld		hl, MsgMenu2
+	ld		hl, MsgMenu1
 	ld		de, LST_LINE_MSG + 3 << 8
 	call	PrintStr
-	ld		hl, MsgMenu3
+	ld		hl, MsgMenu2
 	ld		de, LST_LINE_MSG + 4 << 8
-	call	PrintStr
+	call	PrintStr	
 	call	ReadChar
 	push	af
 	
@@ -481,7 +560,7 @@ CheckKeyExtraMenu:
 		call	PrintStr
 	
 	pop		af
-	cp		'3'
+	cp		'0'
 	jr		z, ExtraMenuExit
 	
 	cp		'1'
@@ -574,9 +653,15 @@ LineOK:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-DisplayFilenames:
+DisplayFilenames:		
+	ld		de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
+	ld		(LineCol), de	
+
 	ld		de, FileCache
 	ld		a, (FileCnt)
+	or		a
+	ret		z
+	
 	ld		b,	a
 
 DisplayFilenamesLoop:
@@ -597,14 +682,20 @@ DisplayFilenamesLoop:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Selects only valid filenames (not deleted and only from first extension)
 GetFileNames:
-	ld ix, TrackBuf
-	ld de, FileCache
-	ld b, MAX_EXT_CNT
+	ld		ix, TrackBuf
+	ld		de, FileCache
+	ld		b, MAX_EXT_CNT
+	xor		a
+	ld		(FileCnt), a
+	ld		hl, AUCnt	
+	ld		(hl), a
+	inc		hl
+	ld		(hl), a
 
 StoreFilenamesLoop:
 	xor a
 	cp (ix + EXT_DEL_FLAG)
-	jp nz, NextExt			;check for deleted
+	jp nz, NextExt			
 
 	;count AU
 	exx
@@ -630,12 +721,14 @@ StoreFilenamesLoop:
 	inc hl					;skip del flag
 
 	push bc
+		/*
 		push de
 			push hl
 				ex de, hl
 				call DisplayFilename
 			pop hl
 		pop de
+		*/
 		ld bc, NAMELEN
 		ldir				;save file name
 
@@ -1099,6 +1192,103 @@ ReadAllHeadersEnd:
 DontInc:
 	pop		bc
 	jr		ReadAllHeadersEnd
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Will report HC version based on copyright string. For HC2000 will report v1/v2. For IF1 will report v1/v2.
+;Versions:
+;"HC - 85", 6, 32, 32, 32, 32, "I.C.E FELIX"
+;"HC - 90", 6, 32, 32, 32, 32, "I.C.E FELIX"
+;"HC - 91", 6, 32, 32, 32, 32, "I.C.E FELIX"
+;"HC2000 ICE FELIX COMPUTER SA" - v1
+;"HC2000", 6, 32, 32, 32, 32, "I.C.E FELIX" - v2
+PrintIntro:
+	ld		hl, VerMsg1
+	ld		de, LST_PROG_INFO + 1 << 8
+	call	PrintStr
+	ld		hl, VerMsg2
+	ld		de, LST_PROG_INFO + 2 << 8
+	call	PrintStr	
+	ld		hl, VerMsg3
+	ld		de, LST_PROG_INFO + 3 << 8
+	call	PrintStr	
+
+	ld		hl, STR_MSG_BASIC
+	ld		de, MsgCompModelName
+	ld		b, 7
+PrintComputerInfoLoop:	
+	ld		a, (hl)
+	cp		' '
+	jr		z, PrintComputerInfoSkip
+	ld		(de), a
+	inc		de
+PrintComputerInfoSkip:		
+	inc		hl
+	djnz	PrintComputerInfoLoop
+	
+	ld		a, (STR_MSG_BASIC + 2)	
+	cp		'2'
+	jr		nz, PrintComputerInfoIF1
+	
+	;HC2000	
+	ld		a, ' '
+	ld		(de), a
+	inc		de
+	ld		a, 'v'
+	ld		(de), a
+	inc		de
+	
+	ld		a, (hl)
+	cp		'I'
+	jr		z, HC2000v1
+	ld		a, '2' | $80		
+	jr		HC2000Store
+HC2000v1:
+	ld		a, '1' | $80
+HC2000Store:	
+	ld		(de), a
+	inc		de
+	;Patch code to look for HC2000 IF1 string at a different address.
+	ld		hl, GetIF1String+1
+	ld		de, STR_MSG_IF1_2000
+	ld		(hl), e
+	inc		hl
+	ld		(hl), d
+	
+PrintComputerInfoIF1:		
+	ld		hl, GetIF1String
+	ld		de, PrintCompInfo
+	push	de
+	jp		IF1Call
+	
+GetIF1String:
+	ld		hl, STR_MSG_IF1_91
+	ld		de, MsgIF1Date
+	ld		a, '.'	
+GetIF1StringLoop:	
+	ldi
+	ldi
+	ld		(de), a
+	inc		de	
+	ldi
+	ldi
+	ld		(de), a
+	inc		de	
+	ldi
+	ld		a, (hl)
+	or		$80
+	ld		(de), a
+	ret	
+	
+PrintCompInfo:			
+	ld		hl, MsgCompModel
+	ld		de, LST_PROG_INFO + 4 << 8
+	call	PrintStr
+
+	ld		hl, MsgIF1Version
+	ld		de, LST_PROG_INFO + 5 << 8
+	call	PrintStr		
+			
+	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	include "hccfg.asm"
@@ -1112,6 +1302,11 @@ DontInc:
 VerMsg1			DEFM	'HC Commander 1.', '0' + $80
 VerMsg2			DEFM	'george.chirtoac', 'a' + $80
 VerMsg3			DEFM	'@gmail.com, 202', '3' + $80
+MsgSysInf		DEFM	'System Info    ', ' ' + $80
+MsgCompModel	DEFB	'Model: '
+MsgCompModelName DEFB	'        ', ' ' | $80
+MsgIF1Version	DEFB	'IF1  : '
+MsgIF1Date		DEFB	'       ', ' ' | $80
 MsgDskInf		DEFM	'Disk Info      ', ' ' + $80
 MsgFileInf		DEFM	'File Info      ', ' ' + $80
 MsgMessages		DEFM	'Messages       ', ' ' + $80
@@ -1153,14 +1348,17 @@ MsgNewFileName	DEFM	'Name,none=abort', ':' | $80
 MsgCopyFile		DEFM	'Copying to '
 MsgCopyFileDrv	DEFM	'A', ':' | $80
 MsgMenu0		DEFM	'Disk options', ':' | $80
-MsgMenu1		DEFM	'1.Format disk '
+MsgMenu1		DEFM	'1.Format '
 MsgMenu1Drv		DEFM	'A', ':' | $80
-MsgMenu2		DEFM	'2.Copy disk '
-MsgMenu2Drv		DEFM	'A', ':' | $80
-MsgMenu3		DEFM	'3.Exit men', 'u' | $80
+MsgMenu2		DEFM	'2.Copy '
+MsgMenu2Drv1	DEFM	'A:->'
+MsgMenu2Drv2	DEFM	'B', ':' | $80
+MsgMenu3		DEFM	'0.Bac', 'k' | $80
 MsgFormat		DEFM	'Formatting '
 MsgFormatDrv	DEFM	'A', ':' | $80
-MsgBlocksLeft	DEFB	'000 blocks lef', 't' | $80
+MsgBlocksLeft	DEFM	'000 blocks lef', 't' | $80
+MsgFileOverwrite	DEFM	'Overwrite (y/n)', '?' | $80
+MsgFileExists	DEFM	'File name exist', 's' | $80
 
 	IFNDEF	_ROM_FNT_
 FontTable:	
@@ -1169,23 +1367,28 @@ FontTable:
 EndCode:
 
 ;Unalocated variables
-UnallocStart	EQU		$
-FileCnt			EQU		$						;File counter, 1B
+UnallocStart	EQU		VAR_START
+FileCnt			EQU		UnallocStart			;File counter, 1B
 NameCol			EQU		FileCnt + 1				;Column for file name, 1B
 SelFile			EQU		NameCol + 1 			;Selected file using cursor, 1B
 CursorAddr		EQU		SelFile + 1				;2 B
 AUCnt			EQU		CursorAddr + 2			;2 B
 SelFileCache	EQU		AUCnt + 2				;2 B
 
-
 FileCache		EQU		SelFileCache + 2					;cache table, size = 92 * 25 = 2300
+;FS block list constants
+UsedBlockListCnt	EQU	FileCache + LST_MAX_FILES*CACHE_SZ
+UsedBlockListBlk	EQU	UsedBlockListCnt + 2
+UsedBlockListSz		EQU 320 * 2 + 2							;640
+
 	IFDEF	_ROM_FNT_
-FontTable		EQU		FileCache + LST_MAX_FILES*CACHE_SZ
-TrackBuf		EQU		FontTable + 872						;size = 16 * 256 = 4096	
+FontTable		EQU		UsedBlockListCnt + UsedBlockListSz
+DataBuf			EQU		FontTable + 872
 	ELSE
-TrackBuf		EQU		FileCache + LST_MAX_FILES*CACHE_SZ	;size = 16 * 256 = 4096		
+DataBuf			EQU		UsedBlockListCnt + UsedBlockListSz
 	ENDIF
-DataBuf			EQU		TrackBuf + SPT*SECT_SZ
+
+TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096		
 
 CopyFileFCBSrc	EQU	DataBuf
 CopyFileFCBDst	EQU	DataBuf + 2
@@ -1194,29 +1397,26 @@ CopyFileResWrite EQU DataBuf + 5
 CopyFileDMAAddr	EQU	DataBuf + 6
 CopyFileDMA		EQU	DataBuf + 8
 
-TheEnd			EQU		DataBuf
-
 ;File viewer constants
 FileData		EQU		DataBuf + SECT_SZ		;leave out room for a sector buffer
 ;File buffer size, without index
-FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - 3*1024
+FileIdxSize		EQU		2 * 1024
+FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize
 
-;FS block list constants
-UsedBlockListCnt	EQU	DataBuf
-UsedBlockListBlk	EQU	DataBuf + 2
-UsedBlockListSz		EQU 320 * 2
-;Copy buffer size
-CopyDiskBuf			EQU DataBuf + 2 + UsedBlockListSz
+
+;Copy buffer size, follows 
+CopyDiskBuf			EQU DataBuf
 
 ;We can use up to about 30KB free space if we load at address 24000.
 ;but that requires distinct BASIC loader, meaning 2 files, wasted disk space and higher initial loading time.
 ;Testing with 15KB vs 25KB didn't show a big difference, around 2 seconds for total time of 42 seconds, for a 40KB file copy.
-MAX_RAM_FREE	EQU		$FF00 - DataBuf - 1024
+MAX_RAM_FREE	EQU		$FF00 - DataBuf
 MAX_AU_RAM		EQU		MAX_RAM_FREE/AU_SZ
 MAX_SECT_RAM	EQU		MAX_RAM_FREE/SECT_SZ
 
-	DISPLAY "DataBuf: ",/D,DataBuf
-	DISPLAY "MAX_RAM_FREE: ",/D,MAX_RAM_FREE
-	DISPLAY "MAX_AU_RAM: ",/D,MAX_AU_RAM	
+	DISPLAY "DataBuf: ", /D,DataBuf
+	DISPLAY "BinSize: ", /D, EndCode - Start
+	DISPLAY "VarSize: ", /D, DataBuf - UnallocStart
+	DISPLAY "MAX_RAM_FREE: ",/D,MAX_RAM_FREE	

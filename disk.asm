@@ -97,7 +97,11 @@ STKEND			EQU	$5C65
 
 PRN_BUF			EQU	23296
 
-;STR_COPYRIGHT	EQU	$1539
+STR_MSG_BASIC	EQU	$1539
+STR_MSG_BASIC_LEN EQU 32
+STR_MSG_IF1_2000	EQU $27F0
+STR_MSG_IF1_91		EQU $23F0
+STR_MSG_IF1_LEN EQU 31
 
 REPDEL			EQU	23561
 REPPER			EQU	23562
@@ -747,10 +751,7 @@ GetErrMsg:
 	ex		af, af'
 
 	ld		hl, IF1Paged			;page-in IF1
-	ld		(HD11), hl
-	rst		8
-	defb	50
-	ret								;return after accesing IF1
+	jp		IF1Call
 
 IF1Paged:
 	ld		hl, ERRMSG

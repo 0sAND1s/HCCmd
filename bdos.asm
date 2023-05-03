@@ -112,23 +112,6 @@ BDOS:
 	DEFB 57
 	ret
 
-;FindFirst
-;IX=fcb
-BDOSFindFirst:
-	IFUSED
-	ld a, 4
-	jr BDOS
-	ENDIF
-
-;FindNext
-;IX=fcb
-BDOSFindNext:
-	IFUSED
-	ld a, 5
-	jr BDOS
-	ENDIF
-	
-
 ;Set DMA address for BDOS
 ;IX=DMA
 BDOSSetDMA:
@@ -186,6 +169,22 @@ DeleteFile:
 	
 	call	DestroyChannel
 	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Returns A > 0 if the file exists
+;HL=file name, A=drive	
+DoesFileExist:
+	IFUSED
+	call	CreateChannel	
+	
+	ld		a, 4
+	call	BDOS	
+	
+	push	af
+		call	DestroyChannel
+	pop		af
+	ret
+	ENDIF
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;IN: E0 = RO, E1 = SYS, HL=filename
@@ -275,8 +274,9 @@ CopyFile:
 FileCopyLoop:				
 	ld		b, MAX_SECT_RAM
 	ld		ix, CopyFileDMAAddr
-	ld		(ix), CopyFileDMA % $FF
-	ld		(ix+1), CopyFileDMA / $FF
+	ld		hl, CopyFileDMA
+	ld		(ix), l
+	ld		(ix+1), h
 FileCopyReadLoop:	
 	push	bc
 		ld		ix, (CopyFileDMAAddr)
