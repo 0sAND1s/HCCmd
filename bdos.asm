@@ -11,7 +11,7 @@
 	IFNDEF	_BDOS_
 	DEFINE	_BDOS_
 
-	include "disk.asm"
+	include "if1.asm"
 
 BDOSInit:
 	xor		a

@@ -527,24 +527,32 @@ CheckKeyExtra:
 	call	PrintStrClr
 	ld		a, (RWTSDrive)
 	add		'A'
-	ld		(MsgMenu1Drv), a
+	ld		(MsgMenu2Drv), a
 	ld		(MsgFormatDrv), a
-	ld		(MsgMenu2Drv1), a
+	ld		(MsgMenu3Drv1), a
+	ld		(MsgMenu4Drv1), a
+	ld		(MsgMenu5Drv1), a
 	ld		a, (RWTSDrive)
 	inc		a
 	xor		%11
 	add		'A'-1
-	ld		(MsgMenu2Drv2), a
+	ld		(MsgMenu3Drv2), a
 	
-CheckKeyExtraMenu:
-	ld		hl, MsgMenu3
+CheckKeyDiskMenu:
+	ld		hl, MsgMenu1
 	ld		de, LST_LINE_MSG + 2 << 8
 	call	PrintStr
-	ld		hl, MsgMenu1
+	ld		hl, MsgMenu2
 	ld		de, LST_LINE_MSG + 3 << 8
 	call	PrintStr
-	ld		hl, MsgMenu2
+	ld		hl, MsgMenu3
 	ld		de, LST_LINE_MSG + 4 << 8
+	call	PrintStr	
+	ld		hl, MsgMenu4
+	ld		de, LST_LINE_MSG + 5 << 8
+	call	PrintStr
+	ld		hl, MsgMenu5
+	ld		de, LST_LINE_MSG + 6 << 8
 	call	PrintStr	
 	call	ReadChar
 	push	af
@@ -558,8 +566,16 @@ CheckKeyExtraMenu:
 		ld		hl, MsgClear
 		ld		de, LST_LINE_MSG + 4 << 8
 		call	PrintStr
+		ld		hl, MsgClear
+		ld		de, LST_LINE_MSG + 5 << 8
+		call	PrintStr
+		ld		hl, MsgClear
+		ld		de, LST_LINE_MSG + 6 << 8
+		call	PrintStr
 	
 	pop		af
+
+CheckKeyDiskMenuLoop:	
 	cp		'0'
 	jr		z, ExtraMenuExit
 	
@@ -589,10 +605,22 @@ CheckKeyExtraMenu:
 	
 CheckExtra2:	
 	cp		'2'
-	jr		nz, CheckKeyExtraMenu
+	jr		nz, CheckExtra3
 	
 	call	CopyDisk	
 	jr		ExtraMenuExit
+
+CheckExtra3:	
+	cp		'3'
+	jp		nz, CheckExtra4
+	call	CopyDiskToCOM
+	jr		ExtraMenuExit
+	
+CheckExtra4:	
+	cp		'4'
+	jp		nz, ExtraMenuExit
+	call	CopyDiskFromCOM
+	jp		HCRunInitDisk
 	
 ExtraMenuExit:
 	jp		HCRunMain
@@ -1292,11 +1320,12 @@ PrintCompInfo:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	include "hccfg.asm"
-	include "disk.asm"
+	include "if1.asm"
 	include "bdos.asm"	
 	include "ui.asm"
 	include "math.asm"	
 	include "txtview.asm"	
+	include "serial.asm"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 VerMsg1			DEFM	'HC Commander 1.', '0' + $80
@@ -1348,12 +1377,16 @@ MsgNewFileName	DEFM	'Name,none=abort', ':' | $80
 MsgCopyFile		DEFM	'Copying to '
 MsgCopyFileDrv	DEFM	'A', ':' | $80
 MsgMenu0		DEFM	'Disk options', ':' | $80
-MsgMenu1		DEFM	'1.Format '
-MsgMenu1Drv		DEFM	'A', ':' | $80
-MsgMenu2		DEFM	'2.Copy '
-MsgMenu2Drv1	DEFM	'A:->'
-MsgMenu2Drv2	DEFM	'B', ':' | $80
-MsgMenu3		DEFM	'0.Bac', 'k' | $80
+MsgMenu1		DEFM	'0. Bac', 'k' | $80
+MsgMenu2		DEFM	'1. Format '
+MsgMenu2Drv		DEFM	'A', ':' | $80
+MsgMenu3		DEFM	'2. Copy '
+MsgMenu3Drv1	DEFM	'A:->'
+MsgMenu3Drv2	DEFM	'B', ':' | $80
+MsgMenu4		DEFM	'3. Copy '
+MsgMenu4Drv1	DEFM	'A:->CO', 'M' | $80
+MsgMenu5		DEFM	'4. Copy COM->'
+MsgMenu5Drv1	DEFM	'A', ':' | $80
 MsgFormat		DEFM	'Formatting '
 MsgFormatDrv	DEFM	'A', ':' | $80
 MsgBlocksLeft	DEFM	'000 blocks lef', 't' | $80

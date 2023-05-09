@@ -368,10 +368,10 @@ WriteFSBlockLoop:
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;Copies the allocated blocks from one disk to another.
+;Copies the allocated blocks from one disk to another, dual drive.
 ;TODO: Sort blocks to minimize seek time and improve copy speed.
 CopyDisk:
-	;Get list of used blocks in current disk, stored in DataBuf, max 632 bytes
+	;Get list of used blocks in current disk, max 632 bytes
 	call	ReadUsedBlocksList
 	ld		ix, UsedBlockListBlk	
 	
@@ -467,6 +467,125 @@ CopyDiskLoopWriteLoop:
 	or		h
 	jp		nz, CopyDiskLoop
 	
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Copies the current disk blocks to COM port.	
+;Send count of blocks - 2B, then for each block send block index - 2B, block buffer - 2048B.
+CopyDiskToCOM:
+	;Get list of used blocks in current disk, max 632 bytes
+	call	ReadUsedBlocksList	
+	
+	;Send block count and block indexes
+	ld		hl, (UsedBlockListCnt)
+	add		hl, hl
+	inc		hl
+	inc		hl
+	ld		b, h
+	ld		c, l
+	ld		hl, UsedBlockListCnt
+	call	SERTB			
+	
+	ld		ix, UsedBlockListBlk		
+	
+CopyDiskToCOMLoop:		
+	;Print block count left
+	ld		hl, (UsedBlockListCnt)		;block count, max 320, 2 for catalog
+	ld		de, MsgBlocksLeft
+	call	Byte2Txt
+	ld		hl, MsgBlocksLeft
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr					
+	
+	;Read block into buffer
+	ld		l, (ix)
+	ld		h, (ix+1)
+	ld		de, CopyDiskBuf
+	push	ix
+		call	ReadFSBlock			
+	pop		ix
+	inc		ix
+	inc		ix	
+	
+	;Send block buffer
+	ld		hl, CopyDiskBuf
+	ld		bc, AU_SZ
+	call	SERTB
+	
+	ld		bc, (UsedBlockListCnt)
+	dec		bc
+	ld		(UsedBlockListCnt), bc
+	
+	push	ix
+		call	KbdHit
+	pop		ix
+	ret		c
+	
+	ld		a, b
+	or		c
+	jr		nz, CopyDiskToCOMLoop
+	
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+CopyDiskFromCOM:
+	;Receive block count.
+	ld		hl, UsedBlockListCnt
+	ld		bc, 2
+	ld		e, 0
+	call	SERRB
+
+	;Receive block indexes.
+	ld		hl, (UsedBlockListCnt)
+	add		hl, hl	
+	ld		b, h
+	ld		c, l
+	ld		hl, UsedBlockListBlk
+	ld		e, 0
+	call	SERRB
+	
+	;Read each block by index and write to disk
+	ld		ix, UsedBlockListBlk
+
+CopyDiskFromCOMLoop:
+	;Print block count left
+	ld		hl, (UsedBlockListCnt)		;block count, max 320, 2 for catalog
+	ld		de, MsgBlocksLeft
+	call	Byte2Txt
+	ld		hl, MsgBlocksLeft
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr					
+	
+	;Read block buffer
+	ld		hl, CopyDiskBuf
+	ld		bc, AU_SZ
+	ld		e, 0
+	call	SERRB
+	
+	;Write block to disk
+	ld		l, (ix)
+	ld		h, (ix+1)
+	ld		de, CopyDiskBuf
+	push	ix
+		call	WriteFSBlock			;Stop on error or continue?				
+	pop		ix
+	inc		ix
+	inc		ix
+			
+	ld		bc, (UsedBlockListCnt)
+	dec		bc
+	ld		(UsedBlockListCnt), bc
+	
+	push	ix
+		call	KbdHit
+	pop		ix
+	ret		c
+	
+	ld		a, b
+	or		c
+	jr		nz, CopyDiskFromCOMLoop
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
