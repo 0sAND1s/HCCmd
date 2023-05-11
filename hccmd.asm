@@ -132,7 +132,7 @@ InitUI:
 	ld		de, 23 << 8
 	ld		hl, BtnBar
 	call	PrintStrClr	
-		
+	
 	ld		a, SCR_LBL_CLR
 	ld		hl, MsgSysInf
 	ld		de, LST_PROG_INFO << 8
@@ -321,7 +321,7 @@ CheckKeyCopy:
 	call	PrintStrClr
 	call	ReadChar
 	cp		'y'
-	jp		nz, CopyFileDontOverwrite
+	jr		nz, CopyFileDontOverwrite
 		
 CopyFileDestNotExist:		
 	ld		hl, (SelFileCache)
@@ -1229,7 +1229,7 @@ DontInc:
 ;"HC - 91", 6, 32, 32, 32, 32, "I.C.E FELIX"
 ;"HC2000 ICE FELIX COMPUTER SA" - v1
 ;"HC2000", 6, 32, 32, 32, 32, "I.C.E FELIX" - v2
-PrintIntro:
+PrintIntro:	
 	ld		hl, VerMsg1
 	ld		de, LST_PROG_INFO + 1 << 8
 	call	PrintStr
@@ -1240,6 +1240,7 @@ PrintIntro:
 	ld		de, LST_PROG_INFO + 3 << 8
 	call	PrintStr	
 
+	/*
 	ld		hl, STR_MSG_BASIC
 	ld		de, MsgCompModelName
 	ld		b, 7
@@ -1317,6 +1318,7 @@ PrintCompInfo:
 	call	PrintStr		
 			
 	ret
+	*/
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	include "hccfg.asm"
@@ -1330,12 +1332,12 @@ PrintCompInfo:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 VerMsg1			DEFM	'HC Commander 1.', '0' + $80
 VerMsg2			DEFM	'george.chirtoac', 'a' + $80
-VerMsg3			DEFM	'@gmail.com, 202', '3' + $80
-MsgSysInf		DEFM	'System Info    ', ' ' + $80
-MsgCompModel	DEFB	'Model: '
-MsgCompModelName DEFB	'        ', ' ' | $80
-MsgIF1Version	DEFB	'IF1  : '
-MsgIF1Date		DEFB	'       ', ' ' | $80
+VerMsg3			DEFM	'@gmail.com MAY2', '3' + $80
+MsgSysInf		DEFM	'Program Info   ', ' ' + $80
+;MsgCompModel	DEFB	'Model: '
+;MsgCompModelName DEFB	'        ', ' ' | $80
+;MsgIF1Version	DEFB	'IF1  : '
+;MsgIF1Date		DEFB	'       ', ' ' | $80
 MsgDskInf		DEFM	'Disk Info      ', ' ' + $80
 MsgFileInf		DEFM	'File Info      ', ' ' + $80
 MsgMessages		DEFM	'Messages       ', ' ' + $80
