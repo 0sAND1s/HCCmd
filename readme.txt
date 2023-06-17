@@ -11,7 +11,9 @@ Options:
   - 0 - exits viewer
   - 2 - sets line wrap on/off
 4 - Read selected file properties from file header: type, start address/line, BASIC lenght
-5 - Copy selected file from one drive to the other, from A: to B: or from B: to A:.
+5 - Copy selected file 
+	- from one drive to the other, from A: to B: or from B: to A: or
+	- using a single drive, from one disk to another
 The program will check if a file with that name already exists on destination and will ask for overwrite confirmation.
 If file is marked as read-only, an error will be shown.
 6 - Rename selected file. The program will check if a file with that name already exists and will abbort if it does.
@@ -56,6 +58,4 @@ How to copy HC BASIC disks over serial cable (COM port):
 
 
 Planned features:
-- File and disk copy to work with single drive setup too, by alternating source/destination disks.
-- Extend file viewer to load partial files, to be able to view files that don't fit entierly in RAM.
 - Extend file viewer with a hex viewer, disassembler, BASIC viewer.
