@@ -79,29 +79,70 @@ DestroyChannel:
 	
 
 ;Input: IX=FCB
-CreateFile:
+BDOSCreateFile:
 	ld	a, 9
 	jr	BDOS
 	
 ;Input: IX=FCB
-OpenFile:
+BDOSOpenFile:
 	ld	a, 2
 	jr	BDOS
 
 ;IN: IX=FCB
-CloseFile:
+BDOSCloseFile:
 	ld	a, 3
 	jr	BDOS
 
+
+;0 OK,
+;1 end of file,
+;9 invalid FCB,
+;10 (CP/M) media changed; (MP/M) FCB checksum error,
+;11 (MP/M) unlocked file verification error,
+;0FFh hardware error.
+
 ;IN: IX=FCB	
-ReadFileBlock:
+BDOSReadFileBlockSeq:
 	ld	a, 7
 	jr	BDOS
 
+
+;0 OK,
+;1 directory full,
+;2 disc full,
+;8 (MP/M) record locked by another process,
+;9 invalid FCB,
+;10 (CP/M) media changed; (MP/M) FCB checksum error,
+;11 (MP/M) unlocked file verification error,
+;0FFh hardware error.
+	
 ;IN: IX=FCB
-WriteFileBlock:
+BDOSWriteFileBlockSeq:
 	ld	a, 8
 	jr	BDOS
+	
+	
+;0 OK
+;1 Reading unwritten data
+;4 Reading unwritten extent (a 16k portion of file does not exist)
+;6 Record number out of range
+;9 Invalid FCB	
+BDOSReadFileBlockRandom:
+	ld	a, 18
+	jr	BDOS
+	
+;0 OK
+;2 Disc full
+;3 Cannot close extent
+;5 Directory full
+;6 Record number out of range
+;8 Record is locked by another process (MP/M)
+;9 Invalid FCB
+;10 Media changed (CP/M); FCB checksum error (MP/M)
+BDOSWriteFileBlockRandom:
+	ld	a, 19
+	jr	BDOS	
+
 
 ;Generic BDOS call
 ;IX=arg, A=function
@@ -118,6 +159,10 @@ BDOSSetDMA:
 	ld a, 13
 	jr BDOS
 	
+;In: IX=FCB
+BDOSSetRandFilePtr:
+	ld	a, 21
+	jr	BDOS
 	
 ;In: HL=filename
 ;Out: HL=file size in bytes from the 128-bytes record count returned by the BDOS function.
@@ -240,141 +285,314 @@ RenameFile:
 	
 	call	DestroyChannel
 	ret
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Will copy a file from A: to B: or vice versa.
-;HL=source file name
-CopyFile:			
-	;Prepare source file
-	push hl
-		ld 		a, (RWTSDrive)
-		inc		a					;Convert to BASIC drive number: 1,2
-		call	CreateChannel
-		call 	OpenFile
-		ld		(CopyFileFCBSrc), ix
-	pop hl
-	inc  	a						;Cancel if A==$FF
-	jr   	z, CopyFileEnd
+;HL = source file name, A = source drive
+;TODO:
+;Use cases:
+;1. Copy from A: to B: or B: to A:.
+;2. Copy from A: to A:, with alternating disks (single drive) - ask for disk change.
+;3. Copy from A:/B: to COM.
+;4. Copy from COM to A:/B:.
+;Validations:
+;1. Ask for destination: to A:/to B:/to COM/from COM. 
+;2. Ask for new name (except to COM), default to current name, allow changing.
+;3. Check if destination file name exists for A:/B:/from COM. Allow overwrite for different drives, don't allow for same drive.
+CopyFile:		
+	;Check for 0 size files and ignore them.
+	push	hl
+		call 	GetFileSize		
+		ld		a, h
+		or		l
+	pop		hl	
+	ret		z
+		
+	ld 		a, (RWTSDrive)
+	inc		a					;Convert to BASIC drive number: 1,2
+	ld		(CopyFileSrc), a
+	ld		de, CopyFileSrc+1
+	ld		bc, NAMELEN
+	push	hl
+	push	bc
+	ldir	
+	pop		bc
+	pop		hl	
+	ld		de, CopyFileDst+1
+	ldir		
 	
-	;Create destination file
-	ld		a, (ix)
-	xor		%11						;Alternate drive, A->B, B-A
+	xor		a
+	ld		(CopyFileRes), a	
+	
+	ld		hl, MsgAskCopyDest
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+	;make upper case
+	and		%11011111
+	cp		'A'
+	;exit on invalid option
+	ret		c
+	cp		'C'+1
+	ret		nc
+	
+	ld		(MsgCopyFileDrv), a
+	sub		'A'-1
+	ld		(CopyFileDst), a	
+	
+	ld		hl, MsgCopyFile
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr		
+	
+		
+	ld		a, (CopyFileSrc)
+	ld		b, a
+	ld		a, (CopyFileDst)
+	cp		b
+	jr		z, CopyFileSameDrive
+	jr		CopyFileCheckOverwrite
+	
+	;Skip COM copy for now.
+	;cp		3			;'C'
+	;ret		z
+	
+CopyFileSameDrive:
+	ld		hl, MsgInsertDstDsk
+	ld		de, LST_LINE_MSG + 3 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	ld		hl, MsgPressAnyKey
+	ld		de, LST_LINE_MSG + 4 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+
+	ld		a, (RWTSDrive)	
+	;call 	BDOSSelectDisk	
+	call	BDOSInit
+
+CopyFileCheckOverwrite:	
+	;Check if destination file exists.
+	ld		a, (CopyFileDst)
+	ld		hl, CopyFileDst+1
+	call	DoesFileExist
+	inc		a	
+	jr		z, CopyFileDestNotExist
+	
+	;Ask overwrite confirmation.
+	ld		hl, MsgFileOverwrite
+	ld		de, LST_LINE_MSG + 4 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+	cp		'y'
+	ret		nz	
+	
+CopyFileDestNotExist:	
+	;Delete and re-create empty destination file		
+	ld		a, (CopyFileDst)
+	ld		hl, CopyFileDst+1
 	push	af
 	push	hl
 		call	DeleteFile			;Delete destination file if it exists, like the CP/M guide recommends.
 	pop		hl
 	pop		af
 	call	CreateChannel
-	call 	CreateFile
-	ld		(CopyFileFCBDst), ix
+	call 	BDOSCreateFile		
 	inc  	a						;Cancel if A==$FF
-	jr   	z, CopyFileEnd	
-
-FileCopyLoop:				
-	ld		b, MAX_SECT_RAM
-	ld		ix, CopyFileDMAAddr
-	ld		hl, CopyFileDMA
-	ld		(ix), l
-	ld		(ix+1), h
-FileCopyReadLoop:	
-	push	bc
-		ld		ix, (CopyFileDMAAddr)
-		call 	BDOSSetDMA
-		inc		ixh
-		ld		(CopyFileDMAAddr), ix
-
-		ld		ix, (CopyFileFCBSrc)
-		call 	ReadFileBlock
-		or		a
-		ld		(CopyFileResRead), a
-	pop		bc	
-	jr		nz, FileCopyWrite		
-	djnz	FileCopyReadLoop
-		
-FileCopyWrite:		
-	ld		ix, CopyFileDMAAddr
-	ld		hl, CopyFileDMA
-	ld		(ix), l
-	ld		(ix+1), h
+	jp   	z, CopyFileEnd	
 	
-	;Calculate how many sectors were read.
-	ld		a, MAX_SECT_RAM
-	sub		b
+	;Close dest file once created.
+	call	BDOSCloseFile
+	call	DestroyChannel
+	
+	ld		de, 0
+	ld		(FilePosRead), de	
+	ld		(FilePosWrite), de	
+
+CopyFileLoop:					
+	;If copying on different drives, don't prompt for disk change.
+	ld		a, (CopyFileSrc)
 	ld		b, a
+	ld		a, (CopyFileDst)
+	cp		b
+	jr		nz, CopyFileNotSameDrive1
 	
-FileCopyWriteLoop:				
-	push	bc		
-		ld		ix, (CopyFileDMAAddr)
-		call 	BDOSSetDMA
-		inc		ixh
-		ld		(CopyFileDMAAddr), ix
+	ld		hl, MsgInsertSrcDsk
+	ld		de, LST_LINE_MSG + 3 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	ld		hl, MsgPressAnyKey
+	ld		de, LST_LINE_MSG + 4 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar		
+	
+	ld		a, (RWTSDrive)		
+	;call 	BDOSSelectDisk
+	call	BDOSInit
 		
-		ld		ix, (CopyFileFCBDst)
-		call	WriteFileBlock
-		or		a
-		ld		(CopyFileResWrite), a
-	pop		bc	
-	jr		nz, CopyFileEnd		
-	djnz	FileCopyWriteLoop
-		
-CopyFileEnd:
-	;Check if file ended, if not, continue copying.	
-	ld		a, (CopyFileResRead)
-	or		a
-	jr		z, FileCopyLoop
+CopyFileNotSameDrive1:		
+	ld		a, (CopyFileSrc)
+	ld		hl, CopyFileSrc+1
+	call	ReadFileSection
+	ld		a, (CopyFileRes)
+	push	af
 	
-	ld		ix, (CopyFileFCBDst)
-	call 	CloseFile				;close destination file
-	call 	DestroyChannel
+		;If copying on different drives, don't prompt for disk change.
+		ld		a, (CopyFileSrc)
+		ld		b, a
+		ld		a, (CopyFileDst)
+		cp		b
+		jr		nz, CopyFileNotSameDrive2
 	
-	;Don't need to close source file, but must free channel
-	ld		ix, (CopyFileFCBSrc)
-	call 	DestroyChannel
-	
-	ld		a, (CopyFileResWrite)
+		ld		hl, MsgInsertDstDsk
+		ld		de, LST_LINE_MSG + 3 << 8
+		ld		a, SCR_DEF_CLR | CLR_FLASH
+		call	PrintStrClr
+		ld		hl, MsgPressAnyKey
+		ld		de, LST_LINE_MSG + 4 << 8
+		ld		a, SCR_DEF_CLR | CLR_FLASH
+		call	PrintStrClr
+		call	ReadChar	
 
+		ld		a, (RWTSDrive)				
+		;call 	BDOSSelectDisk		
+		call	BDOSInit
+
+CopyFileNotSameDrive2:	
+		ld		a, (CopyFileDst)
+		ld		hl, CopyFileDst+1
+		call	WriteFileSection				
+		ld		a, (CopyFileRes)
+		ld		b, a
+	pop		af
+	or		b
+	ret		nz
+		
+	;Check if file ended, if not, continue copying.		
+	
+	ld		a, (CopyFileSectCnt)
+	dec		a
+	ld		(CopyFileSectCnt), a
+	or		a
+	jr		nz, CopyFileLoop	
+
+CopyFileEnd:	
 	ret
 
+;Reads/Writes disk file portion to/from memory. 
+;Meant to be used with 2 step copy operation: 1) read part of file to RAM, 2) write from RAM to destination file, at specified position.
+;This should work with single-drive file copy from one disk to another.
+;In: A = drive, HL = name, FilePosRead/FilePosWrite = file offset in 128 byte records
+;Out: FileData = read buffer, DE = end of data address, CopyFileRes = result code, FilePosRead/FilePosWrite are updated
+;
+;http://www.gaby.de/cpm/manuals/archive/cpm22htm/ch5.htm#Function_34:
+;"Note that reading or writing the last record of an extent in random mode does not cause an automatic extent switch as it does in sequential mode."
+;Must use sequential read/write. But for the first operation must use random read/write.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;Reads part of a file
-;In: HL = name, DE = file offset in bytes
-;Out: FileData = read buffer, DE = end of file
-ReadFileSection:	
-	ld 		a, (RWTSDrive)
-	inc		a					;Convert to BASIC drive number: 1,2
-	call	CreateChannel
-	call 	OpenFile
-	ld		(CopyFileFCBSrc), ix
-	inc  	a						;Cancel if A==$FF
-	ret		z
+ReadFileSection:
+	ld		de, BDOSReadFileBlockRandom
+	ld		(CopyFileOperAddr1), de
+	ld		de, BDOSReadFileBlockSeq
+	ld		(CopyFileOperAddr2), de
+	ld		de, FilePosRead
+	ld		(CopyFilePtr), de
+	ld		(CopyFilePtr2), de
 	
 	;Limit max sectors to read to leave space for the index too.
-	ld		b, FileDataSize/SECT_SZ
-	;Set destination memory pointer.
-	ld		ix, CopyFileDMAAddr
-	ld		hl, FileData
-	ld		(ix), l
-	ld		(ix+1), h
-ReadFileSectionLoop:	
+	push	af
+		ld		a, FileDataSize/SECT_SZ
+		ld		(CopyFileSectCnt), a
+	pop		af
+	jr		ReadWriteFileSection
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+WriteFileSection:
+	ld		de, BDOSWriteFileBlockRandom
+	ld		(CopyFileOperAddr1), de
+	ld		de, BDOSWriteFileBlockSeq
+	ld		(CopyFileOperAddr2), de
+	ld		de, FilePosWrite
+	ld		(CopyFilePtr), de
+	ld		(CopyFilePtr2), de		
+	
+
+;Common routine for both read and write operations. Code is patched to execute either read or write.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+ReadWriteFileSection:				
+	call	CreateChannel	
+	ld		(CopyFileFCB), ix	
+	call 	BDOSOpenFile		
+	inc  	a						;Cancel if A==$FF
+	ret		z			
+	
+	;Set DMA initial pointer = FileData
+	push	ix
+		ld		hl, FileData
+		ld		ix, CopyFileDMAAddr	
+		ld		(ix), l
+		ld		(ix+1), h
+		ld		ix, FileData
+		call 	BDOSSetDMA
+	pop		ix
+	
+CopyFilePtr EQU $+2
+	;Update file pointer using read/write random call.
+	ld		de, (FilePosRead)		
+	ld		(ix + FCB_R0), e
+	ld		(ix + FCB_R1), d		
+CopyFileOperAddr1 EQU $ + 1	
+	call 	BDOSReadFileBlockRandom
+	
+	ld		(CopyFileRes), a		
+	or		a
+	jr		nz, ReadWriteFileSectionEnd
+	
+	ld		a, (CopyFileSectCnt)
+	dec		a
+	ld		(CopyFileSectCnt), a
+	jr		z, ReadWriteFileSectionEnd
+	ld		b, a		
+	
+ReadWriteFileSectionLoop:			
 	push	bc
 		ld		ix, (CopyFileDMAAddr)
-		call 	BDOSSetDMA
 		inc		ixh
-		ld		(CopyFileDMAAddr), ix
-
-		ld		ix, (CopyFileFCBSrc)
-		call 	ReadFileBlock
-		or		a
-		ld		(CopyFileResRead), a
+		ld		(CopyFileDMAAddr), ix		
+		call 	BDOSSetDMA		
+		
+		ld		ix, (CopyFileFCB)				
+CopyFileOperAddr2 EQU $ + 1
+		call 	BDOSReadFileBlockSeq		
+		
+		ld		(CopyFileRes), a		
+		or		a		
 	pop		bc	
-	jr		nz, ReadFileSectionEnd		
-	djnz	ReadFileSectionLoop
+	jr		nz, ReadWriteFileSectionEnd		;Exit on read/write error.
+	djnz	ReadWriteFileSectionLoop		;Exit on buffer full.
 			
-ReadFileSectionEnd:
-	ld		ix, (CopyFileFCBSrc)
-	call 	DestroyChannel
+ReadWriteFileSectionEnd:
+	;Update sector count variable with how many sectors were transfered.
+	ld 		a, FileDataSize/SECT_SZ
+	sub		b							;Substract the number of sectors left to read when EOF was encountered or buffer ended.	
+	ld		(CopyFileSectCnt), a		;Store the number of sectors actually read.
+
+	;Update random access file pointer with the last read value, before file ended or before RAM buffer ended.		
+	call	BDOSSetRandFilePtr
+	ld		e, (ix + FCB_R0)
+	ld		d, (ix + FCB_R1)	
+CopyFilePtr2 EQU $+2		
+	ld		(FilePosRead), de		
 	
+	call 	BDOSCloseFile				
+	call 	DestroyChannel
+		
 	ld		de, (CopyFileDMAAddr)
 	dec		d
 	ret

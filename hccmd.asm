@@ -4,14 +4,14 @@
 
 ;Define bellow is commented out to include the font binary in RAM, to make it work with Spectaculator HC-2000 emulator, which doesn't seem to implement the paging. 
 ;If not commented out, it will use the font table in the CPM ROM and the binary will be smaller.
-	;DEFINE  _ROM_FNT_
+	;DEFINE  _REAL_HW_
 
 ;When inserting IF1 variables, our program moves, corrupting our code. 
 ;So we have to put our code after the program as loaded in RAM.	
 	ORG RUN_ADDR
 	
 Start:	
-	IFDEF _ROM_FNT_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
+	IFDEF _REAL_HW_				;If using the fonts from the CP/M ROM, must copy font table to buffer.
 		call InitFonts
 	ENDIF
 	call IF1Init
@@ -295,37 +295,11 @@ CheckKeyCopy:
 	
 	ld		a, (FileCnt)
 	or		a
-	jp		z, ReadKeyLoop
-	
-	ld 		a, (RWTSDrive)
-	inc		a
-	xor		%11
-	add		'A' - 1
-	ld		(MsgCopyFileDrv), a
-	ld		hl, MsgCopyFile
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	
-	ld		hl, (SelFileCache)
-	ld 		a, (RWTSDrive)
-	inc		a	
-	xor		%11		
-	call	DoesFileExist
-	inc		a	
-	jr		z, CopyFileDestNotExist
-	
-	ld		hl, MsgFileOverwrite
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	call	ReadChar
-	cp		'y'
-	jr		nz, CopyFileDontOverwrite
-		
-CopyFileDestNotExist:		
+	jp		z, ReadKeyLoop	
+			
 	ld		hl, (SelFileCache)
 	call	CopyFile
+	ld		a, (CopyFileRes)
 	or		a
 	jr		z, CopyFileOK
 	
@@ -349,6 +323,10 @@ CopyFileDontOverwrite:
 	ld		de, LST_LINE_MSG+2 << 8
 	ld		a, SCR_DEF_CLR
 	call	PrintStrClr
+	;Display destination disk after file copy.
+	ld		a, (CopyFileDst)
+	dec		a
+	ld		(RWTSDrive), a
 	jp		HCRunInitDisk
 
 CheckKeyFileInfo:
@@ -900,7 +878,7 @@ HandleFileSCR:
 
 	pop		hl
 	
-	IFDEF _ROM_FNT_
+	IFDEF _REAL_HW_
 		;Load to alternate SCREEN$ memory
 		ld		de, HC_VID_BANK1
 		call	IF1FileLoad
@@ -937,7 +915,12 @@ HandleFileText:
 
 ViewFile:
 	call	ClrScr
+	ld		hl, 0
+	ld		(FilePosRead), hl
+ViewFileLoop:		
 	ld		hl, (SelFileCache)	
+	ld 		a, (RWTSDrive)
+	inc		a
 	call	ReadFileSection					;DE = last address read
 	ld		hl, FileData
 	;Calculate size of read buffer
@@ -949,7 +932,14 @@ ViewFile:
 		ld	c, e
 	pop		hl
 	call	InitViewer
-	call	PrintLoop
+	call	PrintLoop	
+	;Check if exited viewer because user wanted to.
+	jr		z, ViewFileEnd
+	;Check if file ended -> we need to load the next file segment.
+	ld		a, (CopyFileRes)
+	or		a
+	jr		z, ViewFileLoop		
+	jp		PrintLoop2
 ViewFileEnd:	
 	ret
 
@@ -1372,12 +1362,13 @@ MsgFileStart	DEFM	'Start   :'
 MsgFileStartN	DEFM	'65535 ', ' ' + $80
 MsgReadingExt	DEFM	'Reading heade', 'r' | $80
 MsgClear		DEFM	'               ', ' ' | $80
-MsgDelete		DEFM	'Del file (y/n)', '?' | $80
-MsgSetRO		DEFM	'Set R/O (y/n)', '?' | $80
-MsgSetSYS		DEFM	'Set HID (y/n)', '?' | $80
-MsgNewFileName	DEFM	'Name,none=abort', ':' | $80
+MsgDelete		DEFM	'Del file? y/', 'n' | $80
+MsgSetRO		DEFM	'Set R/O? y/', 'n' | $80
+MsgSetSYS		DEFM	'Set HID? y/', 'n' | $80
+MsgNewFileName	DEFM	'Name?none=abort', ':' | $80
+MsgAskCopyDest	DEFM	'Copy to A/B/COM','?' | $80
 MsgCopyFile		DEFM	'Copying to '
-MsgCopyFileDrv	DEFM	'A', ':' | $80
+MsgCopyFileDrv	DEFM	'A:', ' ' | $80
 MsgMenu0		DEFM	'Disk options', ':' | $80
 MsgMenu1		DEFM	'0. Bac', 'k' | $80
 MsgMenu2		DEFM	'1. Format '
@@ -1392,10 +1383,13 @@ MsgMenu5Drv1	DEFM	'A', ':' | $80
 MsgFormat		DEFM	'Formatting '
 MsgFormatDrv	DEFM	'A', ':' | $80
 MsgBlocksLeft	DEFM	'000 blocks lef', 't' | $80
-MsgFileOverwrite	DEFM	'Overwrite (y/n)', '?' | $80
+MsgFileOverwrite	DEFM	'Overwrite? y/', 'n' | $80
 MsgFileExists	DEFM	'File name exist', 's' | $80
+MsgInsertSrcDsk	DEFM	'Put SOURCE dis', 'k' | $80
+MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
+MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
 
-	IFNDEF	_ROM_FNT_
+	IFNDEF	_REAL_HW_
 FontTable:	
 	incbin "cpmfnt.bin"
 	ENDIF
@@ -1416,7 +1410,7 @@ UsedBlockListCnt	EQU	FileCache + LST_MAX_FILES*CACHE_SZ
 UsedBlockListBlk	EQU	UsedBlockListCnt + 2
 UsedBlockListSz		EQU 320 * 2 + 2							;640
 
-	IFDEF	_ROM_FNT_
+	IFDEF	_REAL_HW_
 FontTable		EQU		UsedBlockListCnt + UsedBlockListSz
 DataBuf			EQU		FontTable + 872
 	ELSE
@@ -1425,17 +1419,21 @@ DataBuf			EQU		UsedBlockListCnt + UsedBlockListSz
 
 TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096		
 
-CopyFileFCBSrc	EQU	DataBuf
-CopyFileFCBDst	EQU	DataBuf + 2
-CopyFileResRead	EQU DataBuf + 4
-CopyFileResWrite EQU DataBuf + 5
-CopyFileDMAAddr	EQU	DataBuf + 6
-CopyFileDMA		EQU	DataBuf + 8
+CopyFileFCB		EQU	DataBuf
+CopyFileRes		EQU DataBuf + 2
+CopyFileDMAAddr	EQU	DataBuf + 3
+CopyFileRCExtRead	EQU	DataBuf + 5
+CopyFileRCExtWrite	EQU	DataBuf + 7
+FilePosRead		EQU	DataBuf + 9
+FilePosWrite	EQU	DataBuf + 11
+CopyFileSectCnt EQU DataBuf + 13
+CopyFileSrc		EQU DataBuf + 15				;drive 1B + name 11B
+CopyFileDst		EQU DataBuf + 27
 
 ;File viewer constants
 FileData		EQU		DataBuf + SECT_SZ		;leave out room for a sector buffer
 ;File buffer size, without index
-FileIdxSize		EQU		2 * 1024
+FileIdxSize		EQU		3 * 1024
 FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize

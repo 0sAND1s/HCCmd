@@ -14,10 +14,12 @@ COORDS		EQU	23728		;Coordinates
 InitViewer:
 	ld		 (FileBegin), hl
 	add		hl, bc
-	;must filter any EOF chars, max 256 of them.
-	dec		h
+	;must filter any EOF chars.	
 	ld		a, EOF_MARKER
+	dec		h	
+	ld		bc, $FF
 	cpir
+	dec		hl
 	dec		hl
 	ld		(FileEnd), hl
 	ld		de, (FileBegin)
@@ -65,6 +67,7 @@ InitViewer:
 	ld		hl, (FileBegin)
 
 	ret
+	
 
 PrintLoop:
 	push	bc
@@ -81,7 +84,7 @@ PrintLoop:
 		ld		(CurLine), de
 	pop		bc
 	call	CheckEnd
-	jr		z, EOF
+	jr		c, ViewFileEOF
 
 	djnz	PrintLoop
 	jr		PrintLoop2
@@ -94,10 +97,10 @@ GetKey:
 	ld		a, (iy - $32)
 	ret
 
-EOF:
+ViewFileEOF:
 	call	GetKey
 	cp		'0'
-	jr		nz, EOF
+	jr		nz, ViewFileEOF
 	ret
 
 PrintLoop2:
@@ -166,7 +169,7 @@ Down:
 	call	GetLine						;get next line pointer
 
 	call	CheckEnd					;check if HL == file end
-	jr		c, PrintLoop2
+	ret		c
 
 	inc		ix								;save next line pointer
 	inc		ix
@@ -316,15 +319,18 @@ GetLineFill:
 	or		a
 	ret		nz
 
+	/*
 	ld		de, (FileEnd)
 	push	hl
-	ex		de, hl
-	or		a
-	sbc		hl, de
-	ld		b, h
-	ld		c, l
-	ld		a, CHAR_CR
+		ex		de, hl
+		or		a
+		sbc		hl, de
+		ld		b, h
+		ld		c, l				
 	pop		hl
+	*/
+	ld		a, CHAR_CR
+	ld		bc, COL_CNT
 	cpir
 	ret		nz
 	ld		a, CHAR_LF

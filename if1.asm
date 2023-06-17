@@ -726,7 +726,7 @@ ReadCatalogTrack:
 	
 	;Sync with BDOS, to avoid disk R/O error on disk change
 	push  af
-		ld  a, (RWTSDrive)
+		ld  a, (RWTSDrive)		
 		call BDOSSelectDisk
 		call BDOSInit
 	pop   af
@@ -903,7 +903,6 @@ CopyMsg:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;RWTS routine I/O block
-;Only drive, track, sector seem to be considered, changing any other parameter doesn't have an effect.
 RWTSParams:
 RWTSBlockType	DEFB	1							;?
 RWTSDrive		DEFB	DRIVE_A_CPM					;NOT like BASIC (0,1,2), just 0,1.
@@ -912,22 +911,27 @@ RWTSTrack		DEFB	0
 RWTSSector		DEFB	0
 RWTSDMA			DEFW	0
 RWTSExtBuf		DEFW	$2932
-RWTSPrmTbl		DEFW	$1f2a
+;The emulators don't like the short times set in the parameter table, but the real hardware works fine and faster.
+	IFDEF _REAL_HW_
+RWTSPrmTbl		DEFW	BasPrmTbl			;$1f2a
+	ELSE
+RWTSPrmTbl		DEFW	$1f2a	
+	ENDIF
 RWTSCmd			DEFB	RWTS_CMD_READ
 ;Results
 RWTSRes			DEFB	0
 RWTSResVolNo	DEFB	0
 RWTSResTmp		DEFB	0, 0, 0, 0, 0
 
-;Param. table, found in ROM, cannot be overriden, it seems the IF1 routine always uses the constants from ROM.
-/*
+;Param. table, usualy found in ROM.
+	IFDEF _REAL_HW_
 BasPrmTbl:
-PrmDevType		DEFB	$01			;$01
-PrmStepRate		DEFB	$06;$09		;$0D	(milisec)
-PrmHeadLoad		DEFB	$10;$16		;$23	(milisec)
-PrmSpinUp		DEFB	$20;$50		;$64	(1/100 sec)
+PrmDevType		DEFB	$01		;$01
+PrmStepRate		DEFB	$01		;$0D	(milisec)
+PrmHeadLoad		DEFB	$01		;$23	(milisec)
+PrmSpinUp		DEFB	$01		;$64	(1/100 sec)
 PrmIntrlvTbl	DEFW	InterleaveTbl
 InterleaveTbl   DEFB	1, 3, 5, 7, 9, 11, 13, 15, 2, 4, 6, 8, 10, 12, 14, 16
-*/
+	ENDIF
 
 	endif
