@@ -6,7 +6,7 @@ COL_CNT		EQU	64
 CHAR_CR		EQU	$0D
 CHAR_LF		EQU	$0A
 CHAR_TAB	EQU	$09
-EOF_MARKER		EQU	$1A
+CHAR_EOF	EQU	$1A
 
 COORDS		EQU	23728		;Coordinates
 
@@ -15,12 +15,12 @@ InitViewer:
 	ld		 (FileBegin), hl
 	add		hl, bc
 	;must filter any EOF chars.	
-	ld		a, EOF_MARKER
-	dec		h	
-	ld		bc, $FF
+	ld		a, CHAR_EOF
+	dec		h		
+	dec		h			
+	ld		bc, SECT_SZ	* 4
 	cpir
-	dec		hl
-	dec		hl
+	dec		hl	
 	ld		(FileEnd), hl
 	ld		de, (FileBegin)
 	or		a
@@ -32,17 +32,17 @@ InitViewer:
 
 
 	ld		hl, (2 << 8) | 4
-	ld		(23561), hl
+	ld		(REPDEL), hl
 
 	ld		hl, 0
 	ld		(COORDS), hl
 
-	ld		hl, 16384 + 6144
+	ld		hl, SCR_ADDR + SCR_PIX_LEN
 	ld		d, h
 	ld		e, l
 	inc		de
 	ld		bc, 767
-	ld		(hl), (1 << 3) | 7
+	ld		(hl), SCR_DEF_CLR
 	ldir
 
 	call	ScrollInit
@@ -265,11 +265,18 @@ GetLineLoop:
 	jr		z, GetLineSkip0A
 
 	cp		CHAR_TAB
-	jr		nz, GetLineNext
+	jr		z, GetLineTab	
+	
+	cp		CHAR_EOF
+	jr		z, GetLineFillLoop
+	
+	jr		GetLineNext
 
+GetLineTab:
+	;1 space tab
 	ld		a, ' '
 	ld		(de), a
-	inc		de
+	inc		de	
 	dec		b
 	jr		z, GetLineSkip0D	;skip tab on end of line
 
@@ -304,7 +311,7 @@ GetLineSkip0A:						;skip 0A
 	jr		nz, GetLineFill
 	inc		hl
 	inc		c
-
+	
 GetLineFill:
 	ld		a, b
 	or		a
@@ -329,6 +336,7 @@ GetLineFill:
 		ld		c, l				
 	pop		hl
 	*/
+	
 	ld		a, CHAR_CR
 	ld		bc, COL_CNT
 	cpir
@@ -384,13 +392,13 @@ PrintMsg:
 	pop		de
 	ld		(COORDS), DE
 
-	ld		hl, 16384 + 6144 + LINE_CNT*32
+	ld		hl, SCR_ADDR + SCR_PIX_LEN + LINE_CNT*32
 	ld		d, h
 	ld		e, l
 	inc		de
-	ld		a, (5 << 3) | 0
+	ld		a, SCR_LBL_CLR
 	ld		(hl), a
-	ld		bc, 31
+	ld		bc, SCR_BYTES_PER_LINE-1
 	ldir
 	ret
 
@@ -444,7 +452,7 @@ MsgLinePr	defb	'   %; '
 MsgLineNo	defb	'     ; '
 MsgLineWrap	defb	'2-Wrap '
 MsgLineWrF	defb	' On'
-			defb	' 0-Exit'
+			defb	'; 0-Exit'
 MsgLineLen	EQU		$ - MsgLine
 
 LineBuf		defb	'                                                                '
@@ -456,6 +464,6 @@ FileLen		defw	0
 FileEnd		defw	0
 PROGR_PERC	defw	0
 
-SCRLinesDown	EQU $5b00
+SCRLinesDown	EQU PRN_BUF
 SCRLinesUp		EQU	SCRLinesDown + LINE_CNT*2
 End:

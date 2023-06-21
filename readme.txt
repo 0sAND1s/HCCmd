@@ -11,21 +11,25 @@ Options:
   - 0 - exits viewer
   - 2 - sets line wrap on/off
 4 - Read selected file properties from file header: type, start address/line, BASIC lenght
-5 - Copy selected file 
-	- from one drive to the other, from A: to B: or from B: to A: or
-	- using a single drive, from one disk to another
+5 - Copy - file copy menu shows up
+	- 0 - Exit copy menu
+	- 1 - Copy selected file from current drive to current drive, asking for disk change confirmation between source and destination disks
+	- 2 - Copy selected file from one drive to the other, from A: to B: or from B: to A:
+	- 3 - Copy selected file from current drive to the COM port. In HCDisk the command is 'getif1 filename COM1 19200' for example.
+	- 4 - Copy from the COM port to the current drive. New file name will be asked for. In HCDisk the command is 'putif1 filename COM1 19200' for example.
 The program will check if a file with that name already exists on destination and will ask for overwrite confirmation.
 If file is marked as read-only, an error will be shown.
-6 - Rename selected file. The program will check if a file with that name already exists and will abbort if it does.
+6 - Rename selected file. The program will check if a file with that name already exists and will abort if it does.
 7 - Set/reset file attributes for the selected file: Read Only, Hidden attributes
 8 - Delete selected file. If file is marked as read only, an error will be displayed. R/O attribute must be cleared before deleting.
-9 - Disk menu
-  - 0 - Back - exit disk menu
-  - 1 - Format current disk
-  - 2 - Copy disk: efficient disk copy, only occupied disk area is copied, from A: to B: or vice versa
+9 - Disk menu - efficient disk copy, only occupied disk area is copied
+  - 0 - Exit menu
+  - 1 - Copy disk using single drive setup, asking for disk change confirmation between source and destination floppy disks
+  - 2 - Copy current disk to the other drive, A: to B: or B: to A:
   - 3 - Copy all current disk data to serial port, for HCDisk on PC
   - 4 - Copy from serial port to current disk, from HCDisk on PC.
-0 - Exit program to BASIC, without reset. RUN will re-execute program.
+  - 5 - Format current disk.
+0 - Exit with reset.
 Enter - Process selected file:
       - Program files are executed
 	  - Byte files are also executed, using the start address for execution, which might not be the case, so it can cause a crash.
@@ -37,8 +41,6 @@ Space - continuously read file headers for all files on disk.
 Known issues:
 - Using the program on 5.25 disks will report 640KB free instead of 320KB. There's no system call to determine if running on 3.5 or 5.25 floppy drive.
 - Format and Disk copy commands don't ask for confirmation.
-- File copy and disk copy only work with dual drive setup currently (both A: and B:). Single drive copy not implemented.
-- The file viewer will load only the first 20KB from a file, as much as it fits in RAM.
 - By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives will work, but errors can be encountered
 when accesing the second hald of the disk. There is a strap on the IF1 board that can enable 3.5 drives (80 tracks).
 

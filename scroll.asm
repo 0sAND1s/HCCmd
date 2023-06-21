@@ -23,7 +23,7 @@ GetCellDown:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Fills the two tables with pointers.
 ScrollInit:
-	ld		hl, 16384
+	ld		hl, SCR_ADDR
 	ld		b, LINE_CNT
 FillScrLinesLoop:
 FillScrLinesPtr	EQU	$ + 1			;pointer in table

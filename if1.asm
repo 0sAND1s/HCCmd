@@ -383,6 +383,10 @@ CopyDiskLoop:
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
+	ld		hl, MsgClear
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
 	
 	;Calculate how many blocks to read = min(MAX_AU_RAM, blocks left)
 	ld		hl, MAX_AU_RAM
@@ -397,7 +401,7 @@ CopyDiskLoopRead:
 	ld		de, CopyDiskBuf
 	;save initial counter and initial block number array position
 	push	bc	
-	push	ix		
+	push	ix			
 	
 CopyDiskLoopReadLoop:		
 		ld		l, (ix)
@@ -418,11 +422,26 @@ CopyDiskLoopReadLoop:
 				
 		djnz	CopyDiskLoopReadLoop
 				
+		;Check if selection is 1=single drive or 2=dual drive
+		ld		a, (CopySelOption)
+		cp		'1'
+		jr		nz, CopyDiskDualDrive1
+		
+		;Prompt for disk change
+		call	PromptDiskChangeDst
+		ld		a, (RWTSDrive)		
+		call	BDOSInit
+		jr		CopyDiskReadEnd
+		
+CopyDiskDualDrive1:
 		;alternate drive
 		ld		a, (RWTSDrive)
+		inc 	a
 		xor		%11
+		dec		a
 		ld		(RWTSDrive), a
 
+CopyDiskReadEnd:
 	;restore initial counter and initial block number array position
 	pop		ix
 	pop		bc
@@ -446,13 +465,9 @@ CopyDiskLoopWriteLoop:
 		add		8
 		ld		d, a
 		
-		djnz	CopyDiskLoopWriteLoop
-		
-		;alternate drive again
-		ld		a, (RWTSDrive)
-		xor		%11
-		ld		(RWTSDrive), a
+		djnz	CopyDiskLoopWriteLoop			
 
+CopyDiskWriteEnd:
 	pop		bc
 	ld		c, b
 	ld		b, 0
@@ -465,9 +480,27 @@ CopyDiskLoopWriteLoop:
 		
 	ld		a, l
 	or		h
-	jp		nz, CopyDiskLoop
+	ret		z						;Exit if finished all blocks.
 	
-	ret
+	;Check if selection is 1=single drive or 2=dual drive
+	ld		a, (CopySelOption)
+	cp		'1'
+	jr		nz, CopyDiskDualDrive2				
+	
+	;Prompt for disk change
+	call	PromptDiskChangeSrc
+	ld		a, (RWTSDrive)		
+	call	BDOSInit
+	jp		CopyDiskLoop
+		
+CopyDiskDualDrive2:		
+	;alternate drive again
+	ld		a, (RWTSDrive)
+	inc		a
+	xor		%11
+	dec		a
+	ld		(RWTSDrive), a
+	jp		CopyDiskLoop	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Copies the current disk blocks to COM port.	

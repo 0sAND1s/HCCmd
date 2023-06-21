@@ -286,7 +286,29 @@ RenameFile:
 	call	DestroyChannel
 	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+PromptDiskChangeDst:
+	ld		hl, MsgInsertDstDsk
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	ld		hl, MsgPressAnyKey
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+	ret
 	
+PromptDiskChangeSrc:
+	ld		hl, MsgInsertSrcDsk
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	ld		hl, MsgPressAnyKey
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Will copy a file from A: to B: or vice versa.
@@ -301,18 +323,11 @@ RenameFile:
 ;1. Ask for destination: to A:/to B:/to COM/from COM. 
 ;2. Ask for new name (except to COM), default to current name, allow changing.
 ;3. Check if destination file name exists for A:/B:/from COM. Allow overwrite for different drives, don't allow for same drive.
-CopyFile:		
-	;Check for 0 size files and ignore them.
-	push	hl
-		call 	GetFileSize		
-		ld		a, h
-		or		l
-	pop		hl	
-	ret		z
-		
+CopyFile:					
 	ld 		a, (RWTSDrive)
 	inc		a					;Convert to BASIC drive number: 1,2
 	ld		(CopyFileSrc), a
+	ld		(CopyFileDst), a
 	ld		de, CopyFileSrc+1
 	ld		bc, NAMELEN
 	push	hl
@@ -325,54 +340,81 @@ CopyFile:
 	
 	xor		a
 	ld		(CopyFileRes), a	
+
+	ld		a, (CopyFileSrc)
+	add		'A'-1
+	;Update menu messages with current drive.
+	ld		(MsgMenuSingleDrv1), a
+	ld		(MsgMenuSingleDrv2), a
+	ld		(MsgMenuDualDrv1), a	
+	ld		(MsgMenuToComDrv), a
+	ld		(MsgMenuFromCOMDrv), a		
+	;Update menu messages with the alternate drive.
+	ld		a, (CopyFileSrc) 	
+	xor		%11	
+	add		'A'-1
+	ld		(MsgMenuDualDrv2), a
 	
-	ld		hl, MsgAskCopyDest
+	ld		hl, MsgMenuFileCopy
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	call	ReadChar	
-	;make upper case
-	and		%11011111
-	cp		'A'
-	;exit on invalid option
-	ret		c
-	cp		'C'+1
-	ret		nc
-	
-	ld		(MsgCopyFileDrv), a
-	sub		'A'-1
-	ld		(CopyFileDst), a	
-	
-	ld		hl, MsgCopyFile
+	ld		hl, MsgMenuBack
 	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr		
+	call	PrintStr	
+	ld		hl, MsgMenuSingle
+	ld		de, LST_LINE_MSG + 3 << 8
+	call	PrintStr	
+	ld		hl, MsgMenuDual
+	ld		de, LST_LINE_MSG + 4 << 8
+	call	PrintStr	
+	ld		hl, MsgMenuToCOM
+	ld		de, LST_LINE_MSG + 5 << 8
+	call	PrintStr
+	ld		hl, MsgMenuFromCOM
+	ld		de, LST_LINE_MSG + 6 << 8
+	call	PrintStr			
+
+	call	ReadChar
+	ld		(CopySelOption), a
 	
-		
-	ld		a, (CopyFileSrc)
-	ld		b, a
-	ld		a, (CopyFileDst)
-	cp		b
+	push	af
+		ld		b, 6
+		call	ClearNMsgLines
+	pop		af
+	
+	;TODO: Implement new file copy menu.
+	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file				
+	cp		'0'
+	jr		nz, CopyFileNotExit
+	pop		hl	
+	jp		ReadKeyLoop
+	
+CopyFileNotExit:	
+	cp		'1'
 	jr		z, CopyFileSameDrive
+	
+	cp		'2'
+	jr		z, CopyFileDualDrive
+	
+	cp		'3'
+	jp		z, CopyFileToCOM
+	
+	cp		'4'
+	jp		z, CopyFileFromCOM
+	
+	pop		hl
+	jp		ReadKeyLoop
+				
+CopyFileDualDrive:
+	ld		a, (CopyFileSrc) 	
+	xor		%11	
+	ld		(CopyFileDst), a
 	jr		CopyFileCheckOverwrite
 	
-	;Skip COM copy for now.
-	;cp		3			;'C'
-	;ret		z
-	
-CopyFileSameDrive:
-	ld		hl, MsgInsertDstDsk
-	ld		de, LST_LINE_MSG + 3 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	ld		hl, MsgPressAnyKey
-	ld		de, LST_LINE_MSG + 4 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	call	ReadChar	
-
-	ld		a, (RWTSDrive)	
-	;call 	BDOSSelectDisk	
+CopyFileSameDrive:	
+	call	PromptDiskChangeDst
+	ld		a, (RWTSDrive)		
 	call	BDOSInit
 
 CopyFileCheckOverwrite:	
@@ -385,7 +427,7 @@ CopyFileCheckOverwrite:
 	
 	;Ask overwrite confirmation.
 	ld		hl, MsgFileOverwrite
-	ld		de, LST_LINE_MSG + 4 << 8
+	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadChar	
@@ -404,7 +446,7 @@ CopyFileDestNotExist:
 	call	CreateChannel
 	call 	BDOSCreateFile		
 	inc  	a						;Cancel if A==$FF
-	jp   	z, CopyFileEnd	
+	ret		z
 	
 	;Close dest file once created.
 	call	BDOSCloseFile
@@ -416,24 +458,13 @@ CopyFileDestNotExist:
 
 CopyFileLoop:					
 	;If copying on different drives, don't prompt for disk change.
-	ld		a, (CopyFileSrc)
-	ld		b, a
-	ld		a, (CopyFileDst)
-	cp		b
+	ld		a, (CopySelOption)
+	cp		'1'
 	jr		nz, CopyFileNotSameDrive1
 	
-	ld		hl, MsgInsertSrcDsk
-	ld		de, LST_LINE_MSG + 3 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	ld		hl, MsgPressAnyKey
-	ld		de, LST_LINE_MSG + 4 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	call	ReadChar		
+	call	PromptDiskChangeSrc
 	
-	ld		a, (RWTSDrive)		
-	;call 	BDOSSelectDisk
+	ld		a, (RWTSDrive)			
 	call	BDOSInit
 		
 CopyFileNotSameDrive1:		
@@ -444,24 +475,13 @@ CopyFileNotSameDrive1:
 	push	af
 	
 		;If copying on different drives, don't prompt for disk change.
-		ld		a, (CopyFileSrc)
-		ld		b, a
-		ld		a, (CopyFileDst)
-		cp		b
+		ld		a, (CopySelOption)
+		cp		'1'
 		jr		nz, CopyFileNotSameDrive2
 	
-		ld		hl, MsgInsertDstDsk
-		ld		de, LST_LINE_MSG + 3 << 8
-		ld		a, SCR_DEF_CLR | CLR_FLASH
-		call	PrintStrClr
-		ld		hl, MsgPressAnyKey
-		ld		de, LST_LINE_MSG + 4 << 8
-		ld		a, SCR_DEF_CLR | CLR_FLASH
-		call	PrintStrClr
-		call	ReadChar	
+		call	PromptDiskChangeDst
 
-		ld		a, (RWTSDrive)				
-		;call 	BDOSSelectDisk		
+		ld		a, (RWTSDrive)						
 		call	BDOSInit
 
 CopyFileNotSameDrive2:	
@@ -482,7 +502,139 @@ CopyFileNotSameDrive2:
 	or		a
 	jr		nz, CopyFileLoop	
 
-CopyFileEnd:	
+	ret
+		
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CopyFileToCOM:
+	xor		a
+	ld		(CopyFileRes), a
+	ld		(CopyFileSectCnt), a
+	ld		de, 0
+	ld		(FilePosRead), de
+	
+CopyFileToCOMLoop:		
+	ld		a, (CopyFileSrc)
+	ld		hl, CopyFileSrc+1
+	call	ReadFileSection	
+		
+	ld		a, (CopyFileSectCnt)
+	or		a
+	jr		z, CopyFileToCOMEnd
+	
+	;Send buffer to COM port.
+	ld		hl, FileData
+	ld		b, a					;Sector size is 256.
+	ld		c, 0
+	call	SERTB		
+	
+	ld		a, (CopyFileRes)
+	or		a
+	jr		z, CopyFileToCOMLoop
+	
+CopyFileToCOMEnd:	
+	;Reset read error code, as 1 is returned when file is finished reading.
+	xor		a
+	ld		(CopyFileRes), a	
+	
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+CopyFileFromCOM:
+	xor		a
+	ld		(CopyFileRes), a	
+	ld		de, 0
+	ld		(FilePosWrite), de
+	
+	;Must ask for the new file name and check to not exist.	
+	ld		hl, MsgNewFileName
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	
+	ld		hl, MsgClear
+	ld		de, FileData
+	ld		bc, NAMELEN
+	ldir
+	ld		a, $80 | ' '
+	ld		(de), a
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		hl, FileData
+	call	PrintStr
+	
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		bc, NAMELEN
+	call	ReadString
+	
+	ld		de, FileData
+	ld		a, (de)
+	cp		' '					;If starting with space, input was canceled.
+	ret		z
+	
+	;Check if new name doesn't exist already.
+	ld		hl, FileData
+	ld 		a, (CopyFileDst)	
+	call	DoesFileExist
+	inc		a	
+	jr		z, CopyFileFromCOMNameOK
+
+	;Ask overwrite confirmation.
+	ld		hl, MsgFileOverwrite
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar	
+	cp		'y'
+	ret		nz	
+	
+CopyFileFromCOMNameOK:	
+	;Copy new file name
+	ld		hl, FileData
+	ld		de, CopyFileDst+1
+	ld		bc, NAMELEN
+	ldir
+		
+	;Delete and re-create empty destination file		
+	ld		a, (CopyFileDst)
+	ld		hl, CopyFileDst+1
+	push	af
+	push	hl
+		call	DeleteFile			;Delete destination file if it exists, like the CP/M guide recommends.
+	pop		hl
+	pop		af
+	call	CreateChannel
+	call 	BDOSCreateFile		
+	inc  	a						;Cancel if A==$FF
+	ret		z	
+	;Close dest file once created.
+	call	BDOSCloseFile
+	call	DestroyChannel
+	
+CopyFileFromCOMLoop:		
+	ld		hl, FileData
+	ld		bc, FileDataSize
+	ld		e, 1				;Exit on timeout, don't get stuck waiting for more data from PC.
+	call	SERRB				;BC = Number of bytes read from COM
+	ld		a, c
+	or		b
+	ret		z
+
+	;If C is not 0, add one more sector.
+	ld 		a, c
+	or		a
+	jr		z, CopyFileFromCOMDontInc
+	inc		b
+CopyFileFromCOMDontInc:	
+	ld		a, b				;Sector size is 256			
+	ld		(CopyFileSectCnt), a
+	ld		a, (CopyFileDst)
+	ld		hl, CopyFileDst+1	
+	call	WriteFileSection	
+	
+	ld		a, (CopyFileRes)
+	or		a
+	jr		z, CopyFileFromCOMLoop
+	
 	ret
 
 ;Reads/Writes disk file portion to/from memory. 
@@ -502,7 +654,7 @@ ReadFileSection:
 	ld		(CopyFileOperAddr2), de
 	ld		de, FilePosRead
 	ld		(CopyFilePtr), de
-	ld		(CopyFilePtr2), de
+	ld		(CopyFilePtr2), de	
 	
 	;Limit max sectors to read to leave space for the index too.
 	push	af
@@ -554,18 +706,15 @@ CopyFileOperAddr1 EQU $ + 1
 	or		a
 	jr		nz, ReadWriteFileSectionEnd
 	
-	ld		a, (CopyFileSectCnt)
-	dec		a
-	ld		(CopyFileSectCnt), a
-	jr		z, ReadWriteFileSectionEnd
+	ld		a, (CopyFileSectCnt)	
 	ld		b, a		
 	
 ReadWriteFileSectionLoop:			
 	push	bc
-		ld		ix, (CopyFileDMAAddr)
+		ld		ix, (CopyFileDMAAddr)		
+		call 	BDOSSetDMA		
 		inc		ixh
 		ld		(CopyFileDMAAddr), ix		
-		call 	BDOSSetDMA		
 		
 		ld		ix, (CopyFileFCB)				
 CopyFileOperAddr2 EQU $ + 1

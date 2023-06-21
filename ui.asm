@@ -47,7 +47,8 @@ INK_YELLOW		EQU	CLR_YELLOW
 INK_WHITE		EQU	CLR_WHITE
 
 
-;SCR_ATTR_ADDR	EQU 22528
+SCR_ATTR_ADDR	EQU 22528
+SCR_ADDR		EQU 16384
 SCR_PIX_LEN		EQU	6144
 SCR_ATTR_LEN	EQU	768
 SCR_LEN			EQU	SCR_PIX_LEN + SCR_ATTR_LEN
@@ -57,10 +58,11 @@ SCR_COLS		EQU	64
 SCR_LINES		EQU 24
 
 ;used for file names list positioning
-LST_LINES_CNT	EQU	23
-LST_FIRST_LINE	EQU	0
+LST_LINES_CNT	EQU	21
+LST_FIRST_LINE	EQU	1
+LST_LAST_LINE	EQU LST_FIRST_LINE + LST_LINES_CNT
 LST_PROG_INFO	EQU LST_FIRST_LINE
-LST_DISK_INFO	EQU LST_PROG_INFO + 4
+LST_DISK_INFO	EQU LST_PROG_INFO + 3
 LST_FILE_INFO	EQU LST_DISK_INFO + 4
 LST_LINE_MSG	EQU LST_FILE_INFO + 6
 LST_FIRST_COL	EQU	16
@@ -76,15 +78,14 @@ KEY_BACKSP		EQU 12
 KEY_ENTER		EQU	13
 KEY_CTRL		EQU	14
 
-SCR_DEF_CLR		EQU INK_WHITE | PAPER_BLUE
-SCR_SEL_CLR		EQU INK_BLACK | PAPER_CYAN
-SCR_LBL_CLR		EQU	INK_BLACK | PAPER_CYAN
+SCR_DEF_CLR		EQU INK_CYAN | PAPER_BLACK | CLR_BRIGHT
+SCR_SEL_CLR		EQU INK_BLACK | PAPER_GREEN
+SCR_LBL_CLR		EQU	SCR_SEL_CLR
 
 ;Special formating chars
 CHR_CR			EQU	13
 CHR_LF			EQU	10
 CHR_TAB			EQU	09
-CHR_EOF			EQU $1A
 
 
 ;Semi-graphical chars
@@ -273,35 +274,67 @@ LineDir:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-DrawHLine:
-	ld		(ChrParam), a
-
-	ld		b, 16
+DrawHLines:	
+	ld		de, 0
+	ld		b, 64
 	ld		a, CHR_H
-	or		a
+	or		a	
 	call	DrawLine
-
-	ld		b, 4
-DrawUpLine:
-	push	bc
-ChrParam	EQU		$ + 1
-		ld		a, CHR_UC
-		push	de
-			call	PrintChar2
-		pop		de
-		inc		de
-
-		ld		b, NAMELEN
-		ld		a, CHR_H
-		or		a
-		call	DrawLine
-	pop		bc
-	djnz	DrawUpLine
-
-	ld		b, 4
+	
+	ld		de, LST_LAST_LINE << 8
+	ld		b, 64
 	ld		a, CHR_H
-	or		a
-	call	DrawLine
+	or		a	
+	call	DrawLine	
+	
+	ld		de, LST_FIRST_COL
+	ld		a, CHR_UC
+	call	DrawIntersect
+	
+	ld		de, LST_FIRST_COL + NAMELEN+1
+	ld		a, CHR_UC
+	call	DrawIntersect
+	
+	ld		de, LST_FIRST_COL + (NAMELEN+1)*2
+	ld		a, CHR_UC
+	call	DrawIntersect
+	
+	ld		de, LST_FIRST_COL + (NAMELEN+1)*3
+	ld		a, CHR_UC
+	call	DrawIntersect
+	
+	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL
+	ld		a, CHR_DC
+	call	DrawIntersect
+	
+	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)
+	ld		a, CHR_DC
+	call	DrawIntersect
+	
+	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)*2
+	ld		a, CHR_DC
+	call	DrawIntersect
+	
+	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)*3
+	ld		a, CHR_DC
+	call	DrawIntersect
+	
+
+				
+	ret	
+
+
+DrawIntersect:
+	ld		hl, LineCol
+	ld		(hl), de	
+	ld		(CODE), a
+	push	hl
+	call	PrintChar
+	pop		hl
+	inc		(hl)
+	ld		a, CHR_H
+	ld		(CODE), a
+	call	PrintChar
 	ret
 
 
@@ -323,10 +356,6 @@ DrawVLinesLoop:
 	djnz	DrawVLinesLoop
 	ret
 
-PrintChar2:
-	ld		(CODE), a
-	ld		(LineCol), de
-	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;IN: A = color mask
@@ -460,7 +489,7 @@ Store:
 
 ;DE = screen coord; Output: DataBuf == read string, terminated at ' ' | $80
 ReadString:
-	ld		hl, DataBuf
+	ld		hl, FileData
 	push	de
 	pop		ix
 	
@@ -478,7 +507,7 @@ ReadStringLoop:
 	jr	nz, ReadStrChar		
 	
 	push hl
-	ld   bc, DataBuf+1
+	ld   bc, FileData+1
 	sbc	 hl, bc
 	pop  hl
 	jr   c, ReadStrPrint
@@ -506,7 +535,7 @@ ReadStrChar:
 ReadStrPrint:
 	push	hl
 	push	de
-	ld		hl, DataBuf
+	ld		hl, FileData
 	push	ix
 	pop		de
 	call	PrintStr
@@ -514,8 +543,23 @@ ReadStrPrint:
 	pop		hl	
 		
 	jr		ReadStringLoop
+	
+ClearNMsgLines:	
+	ld		de, LST_LINE_MSG + 1 << 8
+ClearNMsgLinesLoop:	
+	push	de
+	push	bc
+	ld		hl, MsgClear
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
+	pop		bc
+	pop		de
+	inc		d
+	djnz	ClearNMsgLinesLoop
+	
+	ret
 
-CurrScrAddr		DEFW	16384
-CurrScrAttrAddr	DEFW	22528
+CurrScrAddr		DEFW	SCR_ADDR
+CurrScrAttrAddr	DEFW	SCR_ATTR_ADDR
 
    	endif
