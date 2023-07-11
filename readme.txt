@@ -39,6 +39,7 @@ Cursor - move selection on screen
 Space - continuously read file headers for all files on disk.
 
 Known issues:
+- The file viewer sometimes crashes, for large files.
 - Using the program on 5.25 disks will report 640KB free instead of 320KB. There's no system call to determine if running on 3.5 or 5.25 floppy drive.
 - Format and Disk copy commands don't ask for confirmation.
 - By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives will work, but errors can be encountered

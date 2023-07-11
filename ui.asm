@@ -287,39 +287,33 @@ DrawHLines:
 	or		a	
 	call	DrawLine	
 	
+	ld		b, 4
 	ld		de, LST_FIRST_COL
-	ld		a, CHR_UC
-	call	DrawIntersect
+DrawUpperIntersectLoop:	
+	push	bc
+	push	de
+		ld		a, CHR_UC
+		call	DrawIntersect
+	pop		de
+	pop		bc
+	ld		hl, NAMELEN+1
+	add		hl, de
+	ex		de, hl
+	djnz	DrawUpperIntersectLoop
 	
-	ld		de, LST_FIRST_COL + NAMELEN+1
-	ld		a, CHR_UC
-	call	DrawIntersect
-	
-	ld		de, LST_FIRST_COL + (NAMELEN+1)*2
-	ld		a, CHR_UC
-	call	DrawIntersect
-	
-	ld		de, LST_FIRST_COL + (NAMELEN+1)*3
-	ld		a, CHR_UC
-	call	DrawIntersect
-	
+	ld		b, 4
 	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL
-	ld		a, CHR_DC
-	call	DrawIntersect
-	
-	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)
-	ld		a, CHR_DC
-	call	DrawIntersect
-	
-	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)*2
-	ld		a, CHR_DC
-	call	DrawIntersect
-	
-	ld		de, (LST_LAST_LINE << 8) | LST_FIRST_COL + (NAMELEN+1)*3
-	ld		a, CHR_DC
-	call	DrawIntersect
-	
-
+DrawLowerIntersectLoop:	
+	push	bc
+	push	de
+		ld		a, CHR_DC
+		call	DrawIntersect
+	pop		de
+	pop		bc
+	ld		hl, NAMELEN+1
+	add		hl, de
+	ex		de, hl
+	djnz	DrawLowerIntersectLoop
 				
 	ret	
 

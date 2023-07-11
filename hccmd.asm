@@ -309,10 +309,8 @@ CheckKeyInfo:
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadFileHeader
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG+1 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
+	ld		b, 1
+	call	ClearNMsgLines
 	jp		ReadKeyLoop
 	
 CheckKeyCopy:
@@ -347,7 +345,7 @@ CopyFileOK:
 	ld		a, (CopySelOption)
 	cp		'3'
 	jp		z, ReadKeyLoop
-	ld		a, (CopyFileDst)	
+	ld		a, (CopyFileDstDrv)	
 	dec		a
 	ld		(RWTSDrive), a
 	jp		HCRunInitDisk
@@ -440,14 +438,8 @@ RenameFileNotExist:
 	jp		HCRunInitDisk
 	
 RenameCanceled:
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
+	ld		b, 2
+	call	ClearNMsgLines
 	jp		ReadKeyLoop
 	
 CheckKeyDel:
@@ -465,10 +457,8 @@ CheckKeyDel:
 	call	ReadChar
 	cp		'y'
 	jr		z, DoFileDelete
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
+	ld		b, 1
+	call	ClearNMsgLines
 	jp		ReadKeyLoop
 DoFileDelete:	
 	ld		hl, (SelFileCache)
@@ -883,8 +873,8 @@ HandleFileCODE:
 		ld		de, PRN_BUF
 		ld		bc, IF1FileLoadEnd - IF1FileLoad
 		ldir
-		ld		a, $C9
-		ld		(de), a				;put a RET here, since FileFree won't be called.
+		;ld		a, $C9
+		;ld		(de), a				;put a RET here, since FileFree won't be called.
 
 	pop		hl
 	ld		de, (DataBuf + HDR_ADDR)	;get CODE start address to load to and then execute
@@ -1229,10 +1219,8 @@ AKey:
 	djnz	NextFile
 
 ReadAllHeadersEnd:
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG+1 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
+	ld		b, 1
+	call	ClearNMsgLines
 	ret
 
 DontInc:
@@ -1322,6 +1310,7 @@ MsgFileExists	DEFM	'File name exist', 's' | $80
 MsgInsertSrcDsk	DEFM	'Put SOURCE dis', 'k' | $80
 MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
 MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
+MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
 
 	IFNDEF	_REAL_HW_
 FontTable:	
@@ -1339,7 +1328,18 @@ AUCnt			EQU		CursorAddr + 2			;2 B
 SelFileCache	EQU		AUCnt + 2				;2 B
 CopySelOption	EQU		SelFileCache+2			;1 B
 
-FileCache		EQU		SelFileCache + 2					;cache table, size = 92 * 25 = 2300
+CopyFileFCB		EQU	CopySelOption + 1
+CopyFileRes		EQU CopyFileFCB + 2
+CopyFileDMAAddr	EQU	CopyFileRes + 1
+FilePosRead		EQU	CopyFileDMAAddr + 2
+FilePosWrite	EQU	FilePosRead + 2
+CopyFileSectCnt EQU FilePosWrite + 2
+CopyFileSrcDrv	EQU CopyFileSectCnt + 1
+CopyFileSrcName	EQU CopyFileSrcDrv + 1
+CopyFileDstDrv	EQU CopyFileSrcName + 11
+CopyFileDstName	EQU CopyFileDstDrv + 1
+
+FileCache		EQU		CopyFileDstName + 11				;cache table, size = 92 * 25 = 2300
 ;FS block list constants
 UsedBlockListCnt	EQU	FileCache + LST_MAX_FILES*CACHE_SZ
 UsedBlockListBlk	EQU	UsedBlockListCnt + 2
@@ -1354,32 +1354,20 @@ DataBuf			EQU		UsedBlockListCnt + UsedBlockListSz
 
 TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096		
 
-CopyFileFCB		EQU	DataBuf
-CopyFileRes		EQU DataBuf + 2
-CopyFileDMAAddr	EQU	DataBuf + 3
-CopyFileRCExtRead	EQU	DataBuf + 5
-CopyFileRCExtWrite	EQU	DataBuf + 7
-FilePosRead		EQU	DataBuf + 9
-FilePosWrite	EQU	DataBuf + 11
-CopyFileSectCnt EQU DataBuf + 13
-CopyFileSrc		EQU DataBuf + 15				;drive 1B + name 11B
-CopyFileDst		EQU DataBuf + 27
 
 ;File viewer constants
-FileData		EQU		DataBuf + SECT_SZ		;leave out room for a sector buffer
+FileData		EQU		DataBuf
 ;File buffer size, without index
-FileIdxSize		EQU		3 * 1024
+FileIdxSize		EQU		2 * 1024
 FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize
+MAX_SECT_BUF	EQU		FileDataSize/SECT_SZ
 
 
 ;Copy buffer size, follows 
 CopyDiskBuf			EQU DataBuf
 
-;We can use up to about 30KB free space if we load at address 24000.
-;but that requires distinct BASIC loader, meaning 2 files, wasted disk space and higher initial loading time.
-;Testing with 15KB vs 25KB didn't show a big difference, around 2 seconds for total time of 42 seconds, for a 40KB file copy.
 MAX_RAM_FREE	EQU		$FF00 - DataBuf
 MAX_AU_RAM		EQU		MAX_RAM_FREE/AU_SZ
 MAX_SECT_RAM	EQU		MAX_RAM_FREE/SECT_SZ

@@ -97,12 +97,6 @@ STKEND			EQU	$5C65
 
 PRN_BUF			EQU	23296
 
-STR_MSG_BASIC	EQU	$1539
-STR_MSG_BASIC_LEN EQU 32
-STR_MSG_IF1_2000	EQU $27F0
-STR_MSG_IF1_91		EQU $23F0
-STR_MSG_IF1_LEN EQU 31
-
 REPDEL			EQU	23561
 REPPER			EQU	23562
 PIP				EQU	23609
@@ -347,7 +341,6 @@ ReadFSBlock:
 	ld		e, c	
 	ld		b, SPAL
 
-ReadFSBlockLoop:	
 	call	ReadDiskSectors	
 	ret
 
@@ -363,7 +356,6 @@ WriteFSBlock:
 	ld		e, c	
 	ld		b, SPAL
 
-WriteFSBlockLoop:	
 	call	WriteDiskSectors
 	ret
 
@@ -382,11 +374,7 @@ CopyDiskLoop:
 	ld		hl, MsgBlocksLeft
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
-	ld		hl, MsgClear
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR
-	call	PrintStrClr
+	call	PrintStrClr	
 	
 	;Calculate how many blocks to read = min(MAX_AU_RAM, blocks left)
 	ld		hl, MAX_AU_RAM
@@ -480,7 +468,7 @@ CopyDiskWriteEnd:
 		
 	ld		a, l
 	or		h
-	ret		z						;Exit if finished all blocks.
+	jr		z, CopyDiskEnd						;Exit if finished all blocks.
 	
 	;Check if selection is 1=single drive or 2=dual drive
 	ld		a, (CopySelOption)
@@ -501,6 +489,11 @@ CopyDiskDualDrive2:
 	dec		a
 	ld		(RWTSDrive), a
 	jp		CopyDiskLoop	
+	
+CopyDiskEnd:
+	ld		b, 1
+	call	ClearNMsgLines
+	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Copies the current disk blocks to COM port.	
@@ -692,8 +685,6 @@ FileLoadNoHeader:
 	ld		bc, SECT_SZ
 	ldir
 	jr		FileReadLoop
-;Copy routine without FileFree as it messes the buffers, probably moves up variables.
-IF1FileLoadEnd:
 
 FileFree:
 	push	de
@@ -701,7 +692,7 @@ FileFree:
 	defb	56			;close channel (52) or detroy channel (56)
 	pop		de
 	ret
-
+IF1FileLoadEnd:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HL = destination buffer, B = count of sectors, DE = track/sector

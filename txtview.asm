@@ -457,7 +457,6 @@ MsgLineLen	EQU		$ - MsgLine
 
 LineBuf		defb	'                                                                '
 CurLine		defw	0
-MaxLine		defw	0
 WrapFlag	defb	1
 FileBegin	defw	0
 FileLen		defw	0
