@@ -171,36 +171,49 @@ InitUI:
 	ret
 
 
-DisplayDiskInfo:
-	ld		a, (RWTSDrive)
-	add		'A' + $80
-	ld		(MsgDriveLet), a
-	ld		hl, MsgDrive
-	ld		de, LST_DISK_INFO + 1 << 8
-	call	PrintStr
-
-	ld		a, (FileCnt)
-	ld		l, a
-	ld		h, 0
-	ld		de, MsgFilesCntNo
-	call	Byte2Txt
-	ld		hl, MsgFilesCnt
-	ld		de, LST_DISK_INFO + 2 << 8
-	call	PrintStr
-
+DisplayDiskInfo:		
 	ld		de, (AUCnt)
 	ld		hl, MAX_FREE_AU_CNT
 	or		a
 	sbc		hl, de
 	rl		l								;*2, 2K/AU
 	rl		h
-	ld		de, MsgFreeSpaceNo - 2
-	call	Word2Txt
-	ld		a, ':'
-	ld		(MsgFreeSpaceNo -1), a
-	ld		hl, MsgFreeSpace
-	ld		de, LST_DISK_INFO + 3 << 8
-	call	PrintStr
+	
+	ld		de, MsgDriveLet
+	call	Word2Txt	
+	ld		a, (MsgDriveLet+4)
+	or		$80
+	ld		(MsgDriveLet+4), a
+	
+	ld		a, (RWTSDrive)
+	add		'A'
+	ld		(MsgDriveLet), a
+	ld		a, '/'
+	ld		(MsgDriveLet+1), a
+	
+	ld		hl, MsgDrive
+	ld		de, LST_DISK_INFO + 1 << 8	
+	call	PrintStr	
+		
+	ld		hl, (AUCnt)
+	rl		l								;*2, 2K/AU
+	rl		h
+	ld		de, MsgFilesCntNo+2
+	call	Word2Txt	
+	ld		a, (MsgFilesCntNo+6)
+	or		$80
+	ld		(MsgFilesCntNo+6), a
+	ld		a, '/'
+	ld		(MsgFilesCntNo+3), a
+	
+	ld		a, (FileCnt)
+	ld		l, a
+	ld		h, 0
+	ld		de, MsgFilesCntNo
+	call	Byte2Txt	
+	ld		hl, MsgFilesCnt
+	ld		de, LST_DISK_INFO + 2 << 8
+	call	PrintStr	
 
 	ret
 
@@ -1246,12 +1259,11 @@ MsgDskInf		DEFM	'Disk Info      ', ' ' + $80
 MsgFileInf		DEFM	'File Info      ', ' ' + $80
 MsgMessages		DEFM	'Messages       ', ' ' + $80
 BtnBar			DEFM	'1-A: 2-B: 3-View 4-Prop 5-Copy 6-Ren 7-Attr 8-Del 9-Disk 0-Exi', 't' + $80
-MsgDrive		DEFM	'Drive   :      '
-MsgDriveLet		DEFM	'A' | $80
-MsgFilesCnt		DEFM	'Files   :'
-MsgFilesCntNo	DEFM	'000/12', '8' + $80
-MsgFreeSpace	DEFM	'Free KB :'
-MsgFreeSpaceNo	DEFM	'000/63', '6' + $80
+MsgDrive		DEFM	'Drv/Free:  '
+MsgDriveLet		DEFM	'A', '/'
+MsgFreeSpaceNo	DEFM	'000'
+MsgFilesCnt		DEFM	'Files/KB:'
+MsgFilesCntNo	DEFM	'000/000'
 MsgErr			DEFM	'Error code '
 MsgErrCode		DEFM	'000',' ' + $80
 MsgLoadingPrg	DEFM	'Loading Progra', 'm' + $80
