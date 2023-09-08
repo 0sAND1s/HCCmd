@@ -2,6 +2,9 @@ HCCommander 1.0
 File manager for ICE Felix HC computers
 george.chirtoaca@gmail.com, 2023
 
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HCCMD1.png)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HCCMD2.png)
+
 Required hardware: HC-2000, HC-91+IF1, HC-90+IF1, HC-85+IF1.
 
 Options:
