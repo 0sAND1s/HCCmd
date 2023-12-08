@@ -1,9 +1,5 @@
 	DEVICE ZXSPECTRUM48
-	ORG $5B00 - (Unpack - Start)
-	
-PROG			EQU $5C53
-VARS			EQU	$5C4B
-NXTLIN			EQU	23637
+	ORG $5B00 - (Unpack - Start)	
 	
 Start:	
 	;Get offset of unpacker. BC is the argument x from RANDOMIZE USR x, the execution address.
@@ -25,7 +21,7 @@ Unpack:
 	call	Unpacker	
 	push	de
 	
-	;CLEAR variables, where our packed binary was, to avoid it being moved when new IF1 channels are created, overwriting our code.
+	;CLEAR variables, where our packed binary was, to avoid it being moved when new IF1 channels are created, overwriting our code.		
 	ld		bc, 0
 	call	$1EAF					;CLEAR address will be taken from RAMTOP.
 	

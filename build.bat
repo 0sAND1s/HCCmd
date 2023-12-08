@@ -4,8 +4,9 @@ SETLOCAL EnableExtensions
 set name=hccmd
 REM Set devel=1 if running on Spectaculator, it will store the fonts in the binary and won't produce the DSK.
 set devel=0
-set RUN_ADDR=26500
+set RUN_ADDR=24500
 set VAR_START=EndCode
+@REM _STANDARD_DRIVE_PARAM_ means floppy access timings to be standard, instead of short ones, since it doesn't work for some drives.
 
 if [%devel%]==[0] (
 set SAVE_DSK=1

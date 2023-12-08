@@ -43,6 +43,31 @@ HCRunInitDisk:
 	ldir
 
 	;main program
+	call	BDOSGetCurrentDrive
+	cp		$FF
+	jr		nz, DetectTrackCount		
+		
+	ld		a, DRIVE_A_CPM			;When loaded from tape/serial, no disk is selected, just select drive 1.	
+
+DetectTrackCount:
+	push	af
+		call	BDOSInit			;This is needed to remove write protection after changing drives.
+	pop		af
+	ld		(RWTSDrive), a			;If a disk is selected previously, show that disk, it can be disk 2, not always 1.	
+	call	BDOSSelectDisk			;Re-select drive 1 or 2.
+	
+	;Determine if disk is 40 or 80 tracks, to know how many blocks are free.
+	ld		e, TRACK_CNT/2
+	ld		hl, FileData
+	call	ReadOneDiskSector	
+	ld		a, (RWTSRes)
+	or		a
+	ld		hl, MAX_FREE_AU_CNT
+	jr		z, DriveIs80Tracks
+	ld		hl, MAX_FREE_AU_CNT/2	
+DriveIs80Tracks:
+	ld		(AUCntMaxFree), hl	
+
 	call 	ReadCatalogTrack
 	or		a					;Signal disk read error. On empty drive code 5 is shown.
 	jr		z, HCRunCacheFiles
@@ -55,13 +80,12 @@ HCRunInitDisk:
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	call	ReadChar
-	ld		a, DRIVE_A_CPM		;Reset drive to A in case B was selected but was empty.
-	ld		(RWTSDrive), a
-	jr		HCRunInitDisk
+	call	BDOSInit
+	jp		HCRunInitDisk
+	
 
 HCRunCacheFiles:
-	call 	GetFileNames		
+	call 	GetFileNames	
 	
 HCRunMain:
 	call 	InitUI		
@@ -75,7 +99,8 @@ HCRunEnd:
 	pop		hl
 	ld		(ERRSP), hl
 
-	ret
+	;ret
+	jp		$12A2			;Jump to ROM main loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -102,7 +127,8 @@ ErrorHandler:
 	call	PrintStrClr
 
 	call	ReadChar
-	jp	Start
+	call	BDOSInit
+	jp		Start
 
 
 
@@ -171,9 +197,9 @@ InitUI:
 	ret
 
 
-DisplayDiskInfo:		
-	ld		de, (AUCnt)
-	ld		hl, MAX_FREE_AU_CNT
+DisplayDiskInfo:			
+	ld		hl, (AUCntMaxFree)
+	ld		de, (AUCntUsed)		
 	or		a
 	sbc		hl, de
 	rl		l								;*2, 2K/AU
@@ -195,7 +221,7 @@ DisplayDiskInfo:
 	ld		de, LST_DISK_INFO + 1 << 8	
 	call	PrintStr	
 		
-	ld		hl, (AUCnt)
+	ld		hl, (AUCntUsed)
 	rl		l								;*2, 2K/AU
 	rl		h
 	ld		de, MsgFilesCntNo+2
@@ -361,6 +387,7 @@ CopyFileOK:
 	ld		a, (CopyFileDstDrv)	
 	dec		a
 	ld		(RWTSDrive), a
+	call	BDOSSelectDisk		;Select destination disk after copy, to show the new file list.
 	jp		HCRunInitDisk
 
 CheckKeyFileInfo:
@@ -518,7 +545,9 @@ AttrChange:
 	jp		HCRunInitDisk	
 	
 SelectDrive:
-	ld 		(RWTSDrive), a
+	ld 		(RWTSDrive), a	
+	call	BDOSSelectDisk
+	;call	BDOSInit		
 	jp		HCRunInitDisk
 	
 CheckKeyDiskMenu:
@@ -636,8 +665,8 @@ DiskMenuExit:
 CheckKeyExit:
 	cp		'0'
 	jp		nz, ReadKeyLoop
-	;jp		HCRunEnd
-	jp		0					;Had to exit by reset, since after doing CLEAR in unpack.asm, we can't return to BASIC as before.
+	jp		HCRunEnd
+	;jp		0					;Had to exit by reset, since after doing CLEAR in unpack.asm, we can't return to BASIC as before.
 
 MoveIt:
 	call 	MoveCursor
@@ -724,7 +753,7 @@ GetFileNames:
 	ld		b, MAX_EXT_CNT
 	xor		a
 	ld		(FileCnt), a
-	ld		hl, AUCnt	
+	ld		hl, AUCntUsed
 	ld		(hl), a
 	inc		hl
 	ld		(hl), a
@@ -741,11 +770,11 @@ StoreFilenamesLoop:
 		ex de, hl			;save first AU no.
 
 		;store disk alocated AU count
-		ld hl, (AUCnt)
+		ld hl, (AUCntUsed)
 		ld c, b
 		ld b, 0
 		add hl, bc
-		ld (AUCnt), hl
+		ld (AUCntUsed), hl
 	pop hl
 	exx
 
@@ -1336,8 +1365,9 @@ FileCnt			EQU		UnallocStart			;File counter, 1B
 NameCol			EQU		FileCnt + 1				;Column for file name, 1B
 SelFile			EQU		NameCol + 1 			;Selected file using cursor, 1B
 CursorAddr		EQU		SelFile + 1				;2 B
-AUCnt			EQU		CursorAddr + 2			;2 B
-SelFileCache	EQU		AUCnt + 2				;2 B
+AUCntUsed		EQU		CursorAddr + 2			;2 B
+AUCntMaxFree	EQU		AUCntUsed + 2			;2 B
+SelFileCache	EQU		AUCntMaxFree + 2		;2 B
 CopySelOption	EQU		SelFileCache+2			;1 B
 
 CopyFileFCB		EQU	CopySelOption + 1
@@ -1370,7 +1400,7 @@ TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU		DataBuf
 ;File buffer size, without index
-FileIdxSize		EQU		2 * 1024
+FileIdxSize		EQU		1 * 1024
 FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize

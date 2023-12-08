@@ -4,6 +4,7 @@
 ;HC specific code, for configuration
 
 HC_CFG_PORT			EQU	$7E
+HC_FLOPPY_PORT		EQU 7
 
 ;BASIC/CPM ROM selection
 HC_CFG_ROM_BAS		EQU	%0
@@ -31,4 +32,13 @@ HC_CFG_CPM			EQU	HC_CFG_ROM_CPM | HC_CFG_ROM_E000 | HC_CFG_VID_C000
 HC_VID_BANK0		EQU	$4000
 HC_VID_BANK1		EQU	$C000
 
+;OUT: A = 0 for 40 tracks, 1 for 80 tracks, as set by jumper 5 on the IF1 board.
+;Info from Rares Atodiresei.
+IsDrive2_80Tracks:
+	IFUSED
+	in	a, (HC_FLOPPY_PORT)
+	and %10
+	ret
+	ENDIF
+	
 	endif

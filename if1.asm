@@ -103,7 +103,7 @@ PIP				EQU	23609
 
 
 ;RWTS routine commands
-RWTS_CMD_POS	EQU	0			;position head
+RWTS_CMD_SEEK	EQU	0			;position head
 RWTS_CMD_READ	EQU	1			;read sector
 RWTS_CMD_WRITE	EQU	2			;write sector
 RWTS_CMD_FMT	EQU	4			;format all tracks
@@ -262,7 +262,7 @@ CheckAUEnd:
 ReadUsedBlocksList:
 	ld		ix, TrackBuf			;source buffer
 	ld		hl, UsedBlockListCnt 	;destination buffer
-	ld		bc, MAX_FREE_AU_CNT		;loop counter
+	ld		bc, (AUCntMaxFree)		;loop counter
 	ld		de, 2					;counter of used blocks, start with 2
 	ld		(hl), e
 	inc		hl
@@ -744,19 +744,16 @@ ReadCatalogTrack:
 	ld de, 0
 	ld b, SPT
 		
-	call ReadDiskSectors
-	or   a
-	ret  nz
-	
-	;Sync with BDOS, to avoid disk R/O error on disk change
-	push  af
-		ld  a, (RWTSDrive)		
-		call BDOSSelectDisk
-		call BDOSInit
-	pop   af
+	call ReadDiskSectors			
 	ret
-
-
+	
+;A = track
+SeekTrack:
+	IFUSED
+	ld	(RWTSTrack), a
+	ld 	a, RWTS_CMD_SEEK
+	jp	RWTS	
+	ENDIF
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -950,12 +947,23 @@ RWTSResTmp		DEFB	0, 0, 0, 0, 0
 ;Param. table, usualy found in ROM.
 	IFDEF _REAL_HW_
 BasPrmTbl:
-PrmDevType		DEFB	$01		;$01
-PrmStepRate		DEFB	$01		;$0D	(milisec)
-PrmHeadLoad		DEFB	$01		;$23	(milisec)
-PrmSpinUp		DEFB	$01		;$64	(1/100 sec)
-PrmIntrlvTbl	DEFW	InterleaveTbl
-InterleaveTbl   DEFB	1, 3, 5, 7, 9, 11, 13, 15, 2, 4, 6, 8, 10, 12, 14, 16
+
+;In one user case, these short time parameters caused issues, the loading from disk was much slower instead of faster.
+	;DEFINE _STANDARD_DRIVE_PARAM_
+	IFDEF _STANDARD_DRIVE_PARAM_
+PrmDevType		DEFB	$01
+PrmStepRate		DEFB	$0D		;(milisec)
+PrmHeadLoad		DEFB	$23		;(milisec)
+PrmSpinUp		DEFB	$64		;(1/100 sec)	
+	ELSE ;Reduce original parameters by a third, instead of setting all to 1s, to increase compatibility with some bad drivers. Minimal values worked for me, but might not work for some users, depending on drive.
+PrmDevType		DEFB	$01
+PrmStepRate		DEFB	$0D/3		;(milisec)
+PrmHeadLoad		DEFB	$23/3		;(milisec)
+PrmSpinUp		DEFB	$64/3		;(1/100 sec)	
+	ENDIF
+	
+PrmIntrlvTbl	DEFW	$1F30	;InterleaveTbl
+;InterleaveTbl   DEFB	1, 3, 5, 7, 9, 11, 13, 15, 2, 4, 6, 8, 10, 12, 14, 16
 	ENDIF
 
 	endif

@@ -34,12 +34,21 @@ BDOSGetDiskRO:
 	jr	BDOS
 	ENDIF
 
-BDOSGetCurrentDisk:
+;OUT: A = 0, 1 or $FF if no drive selected
+BDOSGetCurrentDrive:
 	IFUSED
 	ld		a, 12
 	jr		BDOS
 	ENDIF
 
+;Does log-off for all drives?
+BDOSCloseDrives:
+	IFUSED
+	ld		ixl, a
+	ld		ixh, 0
+	ld		a, 22
+	jr		BDOS
+	ENDIF
 
 ;Create a disk channel for BDOS access (does not open the file)
 ;IN: HL=name addr, A=drive
@@ -721,7 +730,7 @@ WriteFileSection:
 
 ;Common routine for both read and write operations. Code is patched to execute either read or write.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
-ReadWriteFileSection:				
+ReadWriteFileSection:			
 	call	CreateChannel	
 	ld		(CopyFileFCB), ix	
 	call 	BDOSOpenFile		
