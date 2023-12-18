@@ -36,4 +36,4 @@ HCDisk2.exe format %name%.dsk -t 2 -y : open %name%.dsk : tapimp hccmd.tap : dir
 
 REM Put source code, readme in DSK file.
 for %%f in (*.asm;*.md;*.txt;*.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit
-HCDisk2.exe open %name%.dsk : put hccmd1.scr -t b -s 16384 : put hccmd2.scr -t b -s 16384 : put LICENSE : dir : exit
+HCDisk2.exe open %name%.dsk : put Copy.scr -t b -s 16384 : put Disk.scr -t b -s 16384 : put BasLst.scr -t b -s 16384 : put LICENSE : dir : exit

@@ -2,15 +2,16 @@ HCCommander 1.0
 File manager for ICE Felix HC computers
 george.chirtoaca@gmail.com, 2023
 
-![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HCCMD1.png)
-![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HCCMD2.png)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Copy.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Disk.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/BasLst.gif)
 
 Required hardware: HC-2000, HC-91+IF1, HC-90+IF1, HC-85+IF1.
 
 Options:
 1 - List drive A:
 2 - List drive B:
-3 - View selected file - usefull for text files;
+3 - View selected file - shows BASIC program files as text, or show text files. Max file size is about 25KB.
   - 0 - exits viewer
   - 2 - sets line wrap on/off
 4 - Read selected file properties from file header: type, start address/line, BASIC lenght
@@ -31,7 +32,8 @@ If file is marked as read-only, an error will be shown.
   - 2 - Copy current disk to the other drive, A: to B: or B: to A:
   - 3 - Copy all current disk data to serial port, for HCDisk on PC
   - 4 - Copy from serial port to current disk, from HCDisk on PC.
-  - 5 - Format current disk.
+  - 5 - Format drive A:.
+  - 6 - Format drive B:.
 0 - Exit with reset.
 Enter - Process selected file:
       - Program files are executed
@@ -40,13 +42,6 @@ Enter - Process selected file:
       - SCREEN$ files are displayed.
 Cursor - move selection on screen
 Space - continuously read file headers for all files on disk.
-
-Known issues:
-- The file viewer sometimes crashes, for large files.
-- Using the program on 5.25 disks will report 640KB free instead of 320KB. There's no system call to determine if running on 3.5 or 5.25 floppy drive.
-- Format and Disk copy commands don't ask for confirmation.
-- By default, HC computers have drive B: configured for 5.25 inch drives, so using 3.5 drives will work, but errors can be encountered
-when accesing the second hald of the disk. There is a strap on the IF1 board that can enable 3.5 drives (80 tracks).
 
 How it can be used:
 - Use the included HCCMD.tap tape image file with a program that can play tape images on PC/smart phone, like HCDisk, PlayTZX, Tapir.
@@ -64,4 +59,5 @@ How to copy HC BASIC disks over serial cable (COM port):
 
 
 Planned features:
-- Extend file viewer with a hex viewer, disassembler, BASIC viewer.
+- Extend file viewer with a hex viewer, disassembler.
+- Allow selection of multiple files, for operations like delete, copy, attribute change.
