@@ -561,9 +561,7 @@ CheckKeyDiskMenu:
 	ld		(MsgMenuSingleDrv2), a
 	ld		(MsgMenuDualDrv1), a	
 	ld		(MsgMenuToComDrv), a
-	ld		(MsgMenuFromCOMDrv), a		
-	ld		(MsgMenuFmtDrv), a		
-	ld		(MsgFormatDrv), a
+	ld		(MsgMenuFromCOMDrv), a			
 	;Update menu messages with the alternate drive.
 	ld		a, (RWTSDrive)
 	inc		a
@@ -590,20 +588,23 @@ CheckKeyDiskMenu:
 	ld		hl, MsgMenuFromCOM
 	ld		de, LST_LINE_MSG + 6 << 8
 	call	PrintStr		
-	ld		hl, MsgMenuFmt
+	ld		hl, MsgMenuFmt1
 	ld		de, LST_LINE_MSG + 7 << 8
+	call	PrintStr
+	ld		hl, MsgMenuFmt2
+	ld		de, LST_LINE_MSG + 8 << 8
 	call	PrintStr
 	
 	call	ReadChar
 	push	af
-		ld		b, 7
+		ld		b, 8
 		call	ClearNMsgLines
 	pop		af
 	ld		(CopySelOption), a
 
 CheckKeyDiskMenuLoop:	
 	cp		'0'
-	jr		z, DiskMenuExit
+	jp		z, DiskMenuExit
 	
 	;Single drive copy
 	cp		'1'
@@ -611,7 +612,7 @@ CheckKeyDiskMenuLoop:
 	call	CopyDisk
 	ld		b, 2
 	call	ClearNMsgLines
-	jr		DiskMenuExit
+	jp		DiskMenuExit
 	
 	;Dual drive copy
 CheckDiskMenuDualDrive:	
@@ -630,19 +631,45 @@ CheckDiskMenuToCOM:
 	
 CheckDiskMenuFromCOM:	
 	cp		'4'
-	jr		nz, CheckDiskMenuFormat
+	jr		nz, CheckDiskMenuFormat1
 	call	CopyDiskFromCOM
 	jp		HCRunInitDisk
 	
-CheckDiskMenuFormat:
+CheckDiskMenuFormat1:
 	cp		'5'
+	jp		nz, CheckDiskMenuFormat2
+	
+	ld		a, DRIVE_A_CPM
+	ld		(RWTSDrive), a	
+	ld		hl, MsgMenuFmt1+3
+	jr		FormatDiskAction
+	
+CheckDiskMenuFormat2:
+	cp		'6'
 	jp		nz, HCRunMain
 	
-	ld		hl, MsgFormat
+	ld		a, DRIVE_B_CPM
+	ld		(RWTSDrive), a	
+	ld		hl, MsgMenuFmt2+3
+	
+FormatDiskAction:		
 	ld		de, LST_LINE_MSG + 1 << 8
 	ld		a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
+	ld		hl, MsgAreYouSure
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar
+	cp		'y'
+	jp		nz, HCRunMain
+	
+	ld		hl, MsgClear
+	ld		de, LST_LINE_MSG + 2 << 8
+	ld		a, SCR_DEF_CLR
+	call	PrintStrClr
+
 	call	FormatDisk
 	or		a
 	jp		z, HCRunInitDisk
@@ -970,37 +997,95 @@ HandleFileProg:
 
 
 HandleFileText:
-	pop		hl
+	pop		hl	
 
+ViewFile:		
+	ld		hl, MsgFileLoading
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
 
-ViewFile:
-	call	ClrScr
+	;Read file header if not yet read.
+	ld		ix, (SelFileCache)
+	ld		a, (ix + CACHE_FLAG)
+	or		a
+	call	z, ReadFileHeader
+	
+	;Determine file type from header.
+	ld		ix, (SelFileCache)	
+	ld		a, (ix + CACHE_HDR + HDR_TYPE)
+	cp		PROG_TYPE	
+	jr		z, ViewProgramFile	
+	
+	;If not program, load as much as possible to RAM.
 	ld		hl, 0
 	ld		(FilePosRead), hl
-ViewFileLoop:		
 	ld		hl, (SelFileCache)	
 	ld 		a, (RWTSDrive)
 	inc		a
+	ld		b, MAX_SECT_BUF
 	call	ReadFileSection					;DE = last address read
+	
+	ld		ix, (SelFileCache)	
+	ld		a, BYTE_TYPE
+	cp		(ix + CACHE_HDR + HDR_TYPE)	
+	ld		hl, FileData+HDR_SZ
+	jr		nc, ViewFileWithHeader
 	ld		hl, FileData
+	
+ViewFileWithHeader:	
 	;Calculate size of read buffer
 	push	hl
 		ex	de, hl
 		or	a
 		sbc	hl, de
 		ld	b, h
-		ld	c, e
-	pop		hl
-	call	InitViewer
-	call	PrintLoop	
-	;Check if exited viewer because user wanted to.
-	ret		z
+		ld	c, l
+	pop		hl	
+	jr		ViewFileAsText
 	
-	;Check if file ended -> we need to load the next file segment.
-	ld		a, (CopyFileRes)
-	or		a
-	jr		z, ViewFileLoop		
-	jp		PrintLoop2
+ViewProgramFile:	
+	ld		hl, 0
+	ld		(FilePosRead), hl
+	ld		hl, (SelFileCache)	
+	ld 		a, (RWTSDrive)
+	inc		a
+	ld		b, MAX_SECT_BUF/2				;Load half of available RAM with program bytecode, leave half for decoded text.
+	call	ReadFileSection					;DE = last address read
+	ld		hl, FileData
+	ld		a, CHAR_CR
+	inc		de
+	ld		(de), a
+
+	ld		ix, (SelFileCache)
+	ld		c, (ix + CACHE_HDR + HDR_PLEN)
+	ld		b, (ix + CACHE_HDR + HDR_PLEN + 1)
+	ld		hl, FileData + HDR_SZ						;Read program bytecode after the header.
+	ld		de, FileData + (MAX_SECT_BUF/2)*SECT_SZ		;Store text of program after read block.
+	push	de	
+		call	BASIC2TXT			
+	pop		hl
+	
+	;Get decoded text length
+	ld		de, FileData + (MAX_SECT_BUF/2)*SECT_SZ
+	ld		hl, (DestinationAddr)		
+	ld		a, CHAR_EOF
+	ld		(hl), a								;Force EOF char at end of decoded basic program.
+	inc		hl
+	push	de
+		or	a
+		sbc	hl, de
+		ld	b, h
+		ld	c, l
+	pop		hl	
+	
+ViewFileAsText:	
+	push	hl
+	push	bc
+		call	ClrScr	
+	pop		bc
+	pop		hl
+	call	TextViewer	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1279,6 +1364,7 @@ DontInc:
 	include "math.asm"	
 	include "txtview.asm"	
 	include "serial.asm"
+	include "bas2txt.asm"	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 VerMsg1			DEFM	'HCCmd ', __DATE__
@@ -1287,7 +1373,7 @@ MsgSysInf		DEFM	'Program Info   ', ' ' + $80
 MsgDskInf		DEFM	'Disk Info      ', ' ' + $80
 MsgFileInf		DEFM	'File Info      ', ' ' + $80
 MsgMessages		DEFM	'Messages       ', ' ' + $80
-BtnBar			DEFM	'1-A: 2-B: 3-View 4-Prop 5-Copy 6-Ren 7-Attr 8-Del 9-Disk 0-Exi', 't' + $80
+BtnBar			DEFM	'1-A:|2-B:|3-View|4-Prop|5-Copy|6-Ren|7-Attr|8-Del|9-Disk|0-Exi', 't' + $80
 MsgDrive		DEFM	'Drv/Free:  '
 MsgDriveLet		DEFM	'A', '/'
 MsgFreeSpaceNo	DEFM	'000'
@@ -1309,7 +1395,7 @@ MsgFileTypeByte	DEFM	'Bytes ', ' ' + $80
 MsgFileTypeSCR	DEFM	'SCREEN', '$' + $80
 MsgFileTypeChrA	DEFM	'Chr.Ar', 'r' + $80
 MsgFileTypeNoA	DEFM	'No. Ar', 'r' + $80
-MsgFileTypeText	DEFM	'None  ', ' ' + $80
+MsgFileTypeText	DEFM	'Untype', 'd' + $80
 MsgNA			DEFM	'N/A   ', ' ' + $80
 MsgFileLen		DEFM	'Length  :'
 MsgFileLenN		DEFM	'65535 ', 'B' + $80
@@ -1339,11 +1425,8 @@ MsgMenuToComDrv	DEFM	'A:->CO', 'M' | $80
 MsgMenuFromCOM	DEFM	'4. Copy COM->'
 MsgMenuFromCOMDrv	DEFM	'A', ':' | $80
 
-MsgMenuFmt		DEFM	'5. Format '
-MsgMenuFmtDrv	DEFM	'A', ':' | $80
-
-MsgFormat		DEFM	'Formatting '
-MsgFormatDrv	DEFM	'A', ':' | $80
+MsgMenuFmt1		DEFM	'5. Format A', ':' | $80
+MsgMenuFmt2		DEFM	'6. Format B', ':' | $80
 
 MsgBlocksLeft	DEFM	'000 blocks lef', 't' | $80
 MsgFileOverwrite	DEFM	'Overwrite? y/', 'n' | $80
@@ -1352,6 +1435,8 @@ MsgInsertSrcDsk	DEFM	'Put SOURCE dis', 'k' | $80
 MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
 MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
 MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
+MsgAreYouSure	DEFM	'Are you sure?y/', 'n' | $80
+MsgFileLoading	DEFM	'Loading file..', '.' | $80
 
 	IFNDEF	_REAL_HW_
 FontTable:	
@@ -1400,7 +1485,7 @@ TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU		DataBuf
 ;File buffer size, without index
-FileIdxSize		EQU		1 * 1024
+FileIdxSize		EQU		4	 * 1024
 FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize
@@ -1410,6 +1495,7 @@ MAX_SECT_BUF	EQU		FileDataSize/SECT_SZ
 ;Copy buffer size, follows 
 CopyDiskBuf			EQU DataBuf
 
+;256 bytes for the stack should be enough.
 MAX_RAM_FREE	EQU		$FF00 - DataBuf
 MAX_AU_RAM		EQU		MAX_RAM_FREE/AU_SZ
 MAX_SECT_RAM	EQU		MAX_RAM_FREE/SECT_SZ

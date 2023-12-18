@@ -469,6 +469,7 @@ CopyFileSameDrive:
 	;Read first file section from SRC.
 	ld		a, (CopyFileSrcDrv)
 	ld		hl, CopyFileSrcName
+	ld		b, MAX_SECT_BUF
 	call	ReadFileSection	
 	ld		a, (CopyFileSectCnt)
 	or		a
@@ -521,6 +522,7 @@ CopyFileSameDriveLoop:
 
 	ld		a, (CopyFileSrcDrv)
 	ld		hl, CopyFileSrcName
+	ld		b, MAX_SECT_BUF
 	call	ReadFileSection	
 	ld		a, (CopyFileSectCnt)
 	or		a
@@ -552,6 +554,7 @@ CopyFileDualDrive:
 CopyFileDualDriveLoop:			
 	ld		a, (CopyFileSrcDrv)
 	ld		hl, CopyFileSrcName
+	ld		b, MAX_SECT_BUF
 	call	ReadFileSection	
 	ld		a, (CopyFileSectCnt)
 	or		a
@@ -590,6 +593,7 @@ CopyFileToCOM:
 CopyFileToCOMLoop:		
 	ld		a, (CopyFileSrcDrv)
 	ld		hl, CopyFileSrcName
+	ld		b, MAX_SECT_BUF
 	call	ReadFileSection	
 		
 	ld		a, (CopyFileSectCnt)
@@ -693,7 +697,7 @@ CopyFileFromCOMDontInc:
 ;Reads/Writes disk file portion to/from memory. 
 ;Meant to be used with 2 step copy operation: 1) read part of file to RAM, 2) write from RAM to destination file, at specified position.
 ;This should work with single-drive file copy from one disk to another.
-;In: A = drive, HL = name, FilePosRead/FilePosWrite = file offset in 128 byte records
+;In: A = drive, HL = name, FilePosRead/FilePosWrite = file offset in 128 byte records, B = max sectors to read
 ;Out: FileData = read buffer, DE = end of data address, CopyFileRes = result code, FilePosRead/FilePosWrite are updated
 ;
 ;http://www.gaby.de/cpm/manuals/archive/cpm22htm/ch5.htm#Function_34:
@@ -710,9 +714,13 @@ ReadFileSection:
 	ld		(CopyFilePtr2), de	
 	
 	;Limit max sectors to read to leave space for the index too.
-	push	af
-		ld		a, MAX_SECT_BUF
+	push	af		
+		ld		a, b
 		ld		(CopyFileSectCnt), a
+		push	bc
+		exx
+		pop		bc
+		exx
 	pop		af
 	jr		ReadWriteFileSection
 
@@ -780,7 +788,9 @@ CopyFileOperAddr2 EQU $ + 1
 			
 ReadWriteFileSectionEnd:
 	;Update sector count variable with how many sectors were transfered.
-	ld 		a, MAX_SECT_BUF	
+	exx		
+	ld		a, b
+	exx	
 	sub		b							;Substract the number of sectors left to read when EOF was encountered or buffer ended.			
 	ld		(CopyFileSectCnt), a		;Store the number of sectors actually read.
 

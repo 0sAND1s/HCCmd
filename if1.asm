@@ -878,7 +878,8 @@ LoadProgram:
 
 SetFastKeys:
 	ld		hl, REPDEL
-	ld		de, (1 << 8) | 15
+	;ld		de, (1 << 8) | 15
+	ld		de, (1 << 8) | 10
 	ld		(hl), de
 
 	ret
@@ -956,10 +957,11 @@ PrmStepRate		DEFB	$0D		;(milisec)
 PrmHeadLoad		DEFB	$23		;(milisec)
 PrmSpinUp		DEFB	$64		;(1/100 sec)	
 	ELSE ;Reduce original parameters by a third, instead of setting all to 1s, to increase compatibility with some bad drivers. Minimal values worked for me, but might not work for some users, depending on drive.
+PrmFastFactor	EQU		4
 PrmDevType		DEFB	$01
-PrmStepRate		DEFB	$0D/3		;(milisec)
-PrmHeadLoad		DEFB	$23/3		;(milisec)
-PrmSpinUp		DEFB	$64/3		;(1/100 sec)	
+PrmStepRate		DEFB	$0D/PrmFastFactor		;(milisec)
+PrmHeadLoad		DEFB	$23/PrmFastFactor		;(milisec)
+PrmSpinUp		DEFB	$64/PrmFastFactor		;(1/100 sec)	
 	ENDIF
 	
 PrmIntrlvTbl	DEFW	$1F30	;InterleaveTbl

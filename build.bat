@@ -2,11 +2,10 @@
 SETLOCAL EnableExtensions
 
 set name=hccmd
-REM Set devel=1 if running on Spectaculator, it will store the fonts in the binary and won't produce the DSK.
+REM Set devel=1 if running on Spectaculator, it will store the fonts in the final binary and won't produce the DSK.
 set devel=0
-set RUN_ADDR=24500
+set RUN_ADDR=26000
 set VAR_START=EndCode
-@REM _STANDARD_DRIVE_PARAM_ means floppy access timings to be standard, instead of short ones, since it doesn't work for some drives.
 
 if [%devel%]==[0] (
 set SAVE_DSK=1
@@ -36,5 +35,5 @@ REM Put binary in DSK file.
 HCDisk2.exe format %name%.dsk -t 2 -y : open %name%.dsk : tapimp hccmd.tap : dir : exit
 
 REM Put source code, readme in DSK file.
-for %%f in (*.asm;*.txt;*.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit
+for %%f in (*.asm;*.md;*.txt;*.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit
 HCDisk2.exe open %name%.dsk : put hccmd1.scr -t b -s 16384 : put hccmd2.scr -t b -s 16384 : put LICENSE : dir : exit

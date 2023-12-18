@@ -22,34 +22,44 @@ GetCellDown:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Fills the two tables with pointers.
-ScrollInit:
+ScrollInit:			
 	ld		hl, SCR_ADDR
 	ld		b, LINE_CNT
+	ld		ix, SCRLinesDown
+	
+	;Don't init again if already did it.
+	ld		a, (ix)
+	cp		l
+	jr		nz, FillScrLinesLoop
+	ld		a, (ix+1)
+	cp		h
+	ret		z
+	
 FillScrLinesLoop:
-FillScrLinesPtr	EQU	$ + 1			;pointer in table
-	ld		(SCRLinesDown), hl
-	;inc. pointer in destination table (of pointers to lines)
-	ld		de, (FillScrLinesPtr)
-	inc		de
-	inc		de
-	ld		(FillScrLinesPtr), de
+	ld		(ix), l
+	ld		(ix+1), h
+	inc		ix
+	inc		ix
+	;inc. pointer in destination table (of pointers to lines)	
 	call	GetCellDown
 	djnz	FillScrLinesLoop
 
-	;now fill the table in reverse
-	ld		(FillScrLinesSPStore), sp
-	ld		sp, SCRLinesUp + LINE_CNT*2
-	ld		b, LINE_CNT
-	ld		hl, SCRLinesDown
+	;now fill the table in reverse, every 2 bytes
+	push	ix
+	pop		hl
+	dec		hl
+	ld		b, LINE_CNT	
 FillScrLinesRev:
+	ld		d, (hl)	
+	dec		hl
 	ld		e, (hl)
-	inc		hl
-	ld		d, (hl)
-	inc		hl
-	push	de
+	dec		hl
+	
+	ld		(ix), e
+	ld		(ix+1), d
+	inc		ix
+	inc		ix
 	djnz	FillScrLinesRev
-FillScrLinesSPStore	EQU	$ + 1
-	ld		sp, 0
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
