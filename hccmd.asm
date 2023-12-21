@@ -923,7 +923,8 @@ HandleFile:
 		cp		BYTE_TYPE
 		jr		nz, HandleFileText
 
-		ld		hl, (ix + CACHE_HDR + HDR_LEN)		;get length
+		ld		l, (ix + CACHE_HDR + HDR_LEN)		;get length
+		ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
 		ld		de, -SCR_LEN			;check if the length is for a screen$ file
 		add		hl, de
 		ld		a, h
@@ -998,6 +999,12 @@ HandleFileProg:
 
 HandleFileText:
 	pop		hl	
+	
+;Use constants for loading in RAM only as much as we can in order to fit both the binary and the text representation.
+ViewFileConvertRatioText	EQU	1				;Text data is 1:1, byte to byte.
+ViewFileConvertRatioBASIC	EQU	3				;BASIC tokens are expanded to text as 1 byte to 3 chars on average? To test!
+ViewFileConvertRatioHEX		EQU	4				;1 byte expands to 4 bytes when printed as hex.
+ViewFileConvertRatioASM		EQU	3				;Disassembly is expanded as 1:3? To test!
 
 ViewFile:		
 	ld		hl, MsgFileLoading
@@ -1017,13 +1024,16 @@ ViewFile:
 	cp		PROG_TYPE	
 	jr		z, ViewProgramFile	
 	
-	;If not program, load as much as possible to RAM.
+	cp		BYTE_TYPE
+	jr		z, ViewBytesFile
+	
+	;If text file, load as much as possible to RAM.
 	ld		hl, 0
 	ld		(FilePosRead), hl
 	ld		hl, (SelFileCache)	
 	ld 		a, (RWTSDrive)
 	inc		a
-	ld		b, MAX_SECT_BUF
+	ld		b, MAX_SECT_BUF * ViewFileConvertRatioText
 	call	ReadFileSection					;DE = last address read
 	
 	ld		ix, (SelFileCache)	
@@ -1042,7 +1052,50 @@ ViewFileWithHeader:
 		ld	b, h
 		ld	c, l
 	pop		hl	
+	jp		ViewFileAsText
+	
+ViewBytesFile:
+	ld		hl, 0
+	ld		(FilePosRead), hl
+	ld		hl, (SelFileCache)	
+	ld 		a, (RWTSDrive)
+	inc		a
+	ld		b, MAX_SECT_BUF/ViewFileConvertRatioHEX
+	call	ReadFileSection					;DE = last address read
+	ld		hl, FileData + HDR_SZ	
+	ex		de, hl
+	or		a
+	sbc		hl, de
+	ld		b, h
+	ld		c, l
+	
+	;Determine if read buffer was bigger than logical length and set BC to logical length if so.
+	ld		ix, (SelFileCache)	
+	ld		l, (ix + CACHE_HDR + HDR_LEN)
+	ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
+	or		a
+	sbc		hl, bc
+	jr		nc, LogicalLenIsBiggerThanRead
+	ld		c, (ix + CACHE_HDR + HDR_LEN)
+	ld		b, (ix + CACHE_HDR + HDR_LEN + 1)
+	
+LogicalLenIsBiggerThanRead:	
+	ex		de, hl
+	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioHEX
+	push	de
+	
+		call	Bin2HexStr		
+
+	;Get hex print len.	
+	ex		de, hl
+	pop		de
+	or		a
+	sbc		hl, de
+	ld		b, h
+	ld		c, l
+	ex		de, hl
 	jr		ViewFileAsText
+	
 	
 ViewProgramFile:	
 	ld		hl, 0
@@ -1050,7 +1103,7 @@ ViewProgramFile:
 	ld		hl, (SelFileCache)	
 	ld 		a, (RWTSDrive)
 	inc		a
-	ld		b, MAX_SECT_BUF/2				;Load half of available RAM with program bytecode, leave half for decoded text.
+	ld		b, MAX_SECT_BUF/ViewFileConvertRatioBASIC				;Load half of available RAM with program bytecode, leave half for decoded text.
 	call	ReadFileSection					;DE = last address read
 	ld		hl, FileData
 	ld		a, CHAR_CR
@@ -1060,14 +1113,14 @@ ViewProgramFile:
 	ld		ix, (SelFileCache)
 	ld		c, (ix + CACHE_HDR + HDR_PLEN)
 	ld		b, (ix + CACHE_HDR + HDR_PLEN + 1)
-	ld		hl, FileData + HDR_SZ						;Read program bytecode after the header.
-	ld		de, FileData + (MAX_SECT_BUF/2)*SECT_SZ		;Store text of program after read block.
+	ld		hl, FileData + HDR_SZ												;Read program bytecode after the header.
+	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC		;Store text of program after read block.
 	push	de	
 		call	BASIC2TXT			
 	pop		hl
 	
 	;Get decoded text length
-	ld		de, FileData + (MAX_SECT_BUF/2)*SECT_SZ
+	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC
 	ld		hl, (DestinationAddr)		
 	ld		a, CHAR_EOF
 	ld		(hl), a								;Force EOF char at end of decoded basic program.
@@ -1203,7 +1256,8 @@ CheckByte:
 		cp		BYTE_TYPE
 		jr		nz, CheckText
 
-		ld		hl, (ix + CACHE_HDR + HDR_LEN)
+		ld		l, (ix + CACHE_HDR + HDR_LEN)
+		ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
 		ld		bc, -SCR_LEN
 		add		hl, bc
 		ld		a, h
@@ -1436,7 +1490,7 @@ MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
 MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
 MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
 MsgAreYouSure	DEFM	'Are you sure?y/', 'n' | $80
-MsgFileLoading	DEFM	'Loading file..', '.' | $80
+MsgFileLoading	DEFM	'Reading file..', '.' | $80
 
 	IFNDEF	_REAL_HW_
 FontTable:	
@@ -1485,8 +1539,8 @@ TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU		DataBuf
 ;File buffer size, without index
-FileIdxSize		EQU		4	 * 1024
-FileDataSize	EQU		MAX_SECT_RAM * SECT_SZ - FileIdxSize
+FileIdxSize		EQU		5	 * 1024
+FileDataSize	EQU		(MAX_SECT_RAM * SECT_SZ) - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize
 MAX_SECT_BUF	EQU		FileDataSize/SECT_SZ

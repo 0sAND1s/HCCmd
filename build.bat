@@ -10,7 +10,7 @@ set VAR_START=EndCode
 if [%devel%]==[0] (
 set SAVE_DSK=1
 REM assemble main program
-sjasmplus.exe %name%.asm --lst --lstlab --raw=%name%.bin -D_REAL_HW_ -DRUN_ADDR=%RUN_ADDR% -DVAR_START=%VAR_START%
+sjasmplus.exe %name%.asm --lst --lstlab --raw=%name%.bin -D_REAL_HW_ -DRUN_ADDR=%RUN_ADDR% -DVAR_START=%VAR_START% --syntax=f
 ) else (
 set SAVE_DSK=0
 REM assemble main program

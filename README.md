@@ -2,11 +2,23 @@ HCCommander 1.0
 
 File manager for ICE Felix HC computers
 
-george.chirtoaca@gmail.com, 2023
+george[dot]chirtoaca[at]gmail[dot]com, 2023
+
+File copy menu
 
 ![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Copy.gif)
+
+Disk copy menu
+
 ![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Disk.gif)
+
+BASIC program listing
+
 ![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/BasLst.gif)
+
+Hex file listing
+
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HexView.gif)
 
 Required hardware: HC-2000, HC-91+IF1, HC-90+IF1, HC-85+IF1.
 
@@ -75,3 +87,4 @@ How to copy HC BASIC disks over serial cable (COM port):
 Planned features:
 - Extend file viewer with a hex viewer, disassembler.
 - Allow selection of multiple files, for operations like delete, copy, attribute change.
+- Add tape to disk and disk to tape transfer, if memory allows

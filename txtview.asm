@@ -1,3 +1,6 @@
+	IFNDEF _TXTVIEW_
+	DEFINE _TXTVIEW_
+
 LINE_CNT	EQU	23
 COL_CNT		EQU	64
 
@@ -258,6 +261,15 @@ PrintOneLineLoop:
 	
 PrintOneLineNotTab:	
 	push	hl
+		cp	' '
+		jr	c, PrintCharNotValid
+		cp  127
+		jr	nc, PrintCharNotValid
+		
+		jr	PrintCharValid	
+PrintCharNotValid:	
+		ld	a, '.'
+PrintCharValid:
 		ld		(CODE), a
 		push	bc			
 			call	PrintChar			
@@ -307,3 +319,4 @@ MsgLineTotal	defb	'     |'
 				defs	21, ' '
 				defb	'|0:Exi', 't' | $80
 	
+	ENDIF
