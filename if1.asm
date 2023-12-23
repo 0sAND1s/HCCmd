@@ -877,10 +877,10 @@ LoadProgram:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 SetFastKeys:
-	ld		hl, REPDEL
-	;ld		de, (1 << 8) | 15
-	ld		de, (1 << 8) | 10
-	ld		(hl), de
+	ld		a, 10
+	ld		(REPDEL), a
+	ld		a, 1
+	ld		(REPDEL+1),a
 
 	ret
 

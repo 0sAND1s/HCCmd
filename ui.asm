@@ -320,7 +320,10 @@ DrawLowerIntersectLoop:
 
 DrawIntersect:
 	ld		hl, LineCol
-	ld		(hl), de	
+	ld		(hl), e
+	inc		hl
+	ld		(hl), d
+	dec		hl
 	ld		(CODE), a
 	push	hl
 	call	PrintChar

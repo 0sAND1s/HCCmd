@@ -6,11 +6,15 @@ george[dot]chirtoaca[at]gmail[dot]com, 2023
 
 File copy menu
 
-![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Copy.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/CopyMnu.gif)
 
 Disk copy menu
 
-![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Disk.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/DiskMnu.gif)
+
+View file menu
+
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/ViewMnu.gif)
 
 BASIC program listing
 
@@ -19,6 +23,11 @@ BASIC program listing
 Hex file listing
 
 ![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/HexView.gif)
+
+Text file listing
+
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/TextView.gif)
+
 
 Required hardware: HC-2000, HC-91+IF1, HC-90+IF1, HC-85+IF1.
 
@@ -70,7 +79,7 @@ Cursor - move selection on screen
 
 Space - continuously read file headers for all files on disk.
 
-How it can be used:
+How to transfer the binary:
 - Use the included HCCMD.tap tape image file with a program that can play tape images on PC/smart phone, like HCDisk, PlayTZX, Tapir.
 - Write the included HCCMD.DSK disk image to a floppy disk using HCDisk.
 - Use a floppy disk emulator like GoTek with HC and transfer the HCCMD.DSK disk image on a USB stick.
@@ -80,11 +89,11 @@ How it can be used:
 How to copy HC BASIC disks over serial cable (COM port):
 1. Notice in Windows device manager the name of the COM port (COM1, COM2, etc).
 2. Run the latest HCDisk version and open or create a disk image in the format for HC BASIC 3.5.
-3. In HCDisk use command 'copyfs to COM1' to copy from HC to PC or command 'copyfs from COM1' to copy from PC to HC.
+3. In HCDisk use command 'copyfs from COM1' to copy from HC to PC or command 'copyfs to COM1' to copy from PC to HC.
 4. Run the latest HCCmd version and use menu '9-Disk', then option '3. Copy A:->COM' to copy from HC to PC or option '4. Copy COM->A:' to copy from PC to HC.
 5. A message will show on PC and on HC showing how many blocks are left to copy. A full disk takes about 7 minutes to copy.
 
 Planned features:
-- Extend file viewer with a hex viewer, disassembler.
+- Extend file viewer with a disassembler.
 - Allow selection of multiple files, for operations like delete, copy, attribute change.
 - Add tape to disk and disk to tape transfer, if memory allows

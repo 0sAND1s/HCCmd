@@ -1,4 +1,4 @@
-	DEVICE ZXSPECTRUM48
+
 	ORG $5B00 - (Unpack - Start)	
 	
 Start:	

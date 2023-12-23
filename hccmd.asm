@@ -1,6 +1,4 @@
-	DEVICE ZXSPECTRUM48
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Define bellow is commented out to include the font binary in RAM, to make it work with Spectaculator HC-2000 emulator, which doesn't seem to implement the paging. 
 ;If not commented out, it will use the font table in the CPM ROM and the binary will be smaller.
@@ -129,9 +127,6 @@ ErrorHandler:
 	call	ReadChar
 	call	BDOSInit
 	jp		Start
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -421,7 +416,23 @@ CheckKeyView:
 	or		a
 	jp		z, ReadKeyLoop
 	
-	call	ViewFile
+
+	ld		hl, MsgViewFileMenu
+	ld		de, LST_LINE_MSG + 1 << 8
+	ld		a, SCR_DEF_CLR | CLR_FLASH
+	call		PrintStrClr
+	ld		hl, MsgViewFileText
+	ld		de, LST_LINE_MSG + 2 << 8
+	call		PrintStr
+	ld		hl, MsgViewFileHex
+	ld		de, LST_LINE_MSG + 3 << 8
+	call		PrintStr
+	ld		hl, MsgViewFileAuto
+	ld		de, LST_LINE_MSG + 4 << 8
+	call		PrintStr
+	call		ReadChar
+
+	call		ViewFile
 	jp		HCRunMain
 	
 CheckKeyRename:
@@ -830,18 +841,19 @@ StoreFilenamesLoop:
 		exx
 		pop		hl
 		ex		de, hl
-		ld		(hl), de	;save first AU
-
+		ld		(hl), e
 		inc		hl
+		ld		(hl), d		;save first AU
+		
 		inc		hl
 
 		exx					;save AU cnt for file
 		push	bc
 		exx
 		pop		bc
-		ld		(hl), bc
-
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 
 		;xor		a			;make flag 0 to signal that header is not read yet
@@ -882,11 +894,17 @@ FindExt:					;BC' = AU cnt for this ext
 			exx
 			pop		bc
 
-			ld		de, (hl)		;DE = Current AU CNT for file
+			ld		e, (hl)		;DE = Current AU CNT for file
+			inc		hl
+			ld		d, (hl)
+			dec		hl
 			ex		de, hl
 			add		hl, bc
 			ex		de, hl
-			ld		(hl), de
+			ld		(hl), e
+			inc		hl
+			ld		(hl), d
+			dec		hl
 FindExtEnd:
 		pop		de
 	pop		bc
@@ -1000,145 +1018,147 @@ HandleFileProg:
 HandleFileText:
 	pop		hl	
 	
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+
 ;Use constants for loading in RAM only as much as we can in order to fit both the binary and the text representation.
-ViewFileConvertRatioText	EQU	1				;Text data is 1:1, byte to byte.
-ViewFileConvertRatioBASIC	EQU	3				;BASIC tokens are expanded to text as 1 byte to 3 chars on average? To test!
-ViewFileConvertRatioHEX		EQU	4				;1 byte expands to 4 bytes when printed as hex.
+ViewFileConvertRatioText	EQU	1				;Text data is stored as is, 1:1, byte to byte.
+ViewFileConvertRatioBASIC	EQU	4				;BASIC tokens are expanded to text as 1 byte to 3 chars on average? To test!
+ViewFileConvertRatioHEX		EQU	5				;1 byte expands to 4 bytes when printed as hex. So RAM stores 1+4 bytes for each byte.
 ViewFileConvertRatioASM		EQU	3				;Disassembly is expanded as 1:3? To test!
 
-ViewFile:		
-	ld		hl, MsgFileLoading
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
-	call	PrintStrClr
+;Auto viewing mode will show content bases on file type: no type - as text, programs as BASIC, rest - as hex
+;Skip header, if exists.
 
-	;Read file header if not yet read.
+ViewFile:
+	push		af				;Save file menu choice.
+
+		ld		hl, MsgFileLoading
+		ld		de, LST_LINE_MSG + 1 << 8
+		ld		a, SCR_DEF_CLR | CLR_FLASH
+		call		PrintStrClr
+
+		;Read file header if not yet read.
+		ld		ix, (SelFileCache)
+		ld		a, (ix + CACHE_FLAG)
+		or		a
+		call		z, ReadFileHeader
+
+	pop		af
+	cp		'1'
+	jr		z, ViewFileAsText
+
+	cp		'2'
+	jr		z, ViewFileAsHex
+
+ViewFileAuto:
+	;Decide how to display file, if auto mode.
 	ld		ix, (SelFileCache)
-	ld		a, (ix + CACHE_FLAG)
-	or		a
-	call	z, ReadFileHeader
-	
-	;Determine file type from header.
-	ld		ix, (SelFileCache)	
 	ld		a, (ix + CACHE_HDR + HDR_TYPE)
 	cp		PROG_TYPE	
-	jr		z, ViewProgramFile	
+	jr		z, ViewFileAsBASIC	
 	
 	cp		BYTE_TYPE
-	jr		z, ViewBytesFile
+	jr		z, ViewFileAsHex
 	
+ViewFileAsText:
 	;If text file, load as much as possible to RAM.
-	ld		hl, 0
-	ld		(FilePosRead), hl
-	ld		hl, (SelFileCache)	
-	ld 		a, (RWTSDrive)
-	inc		a
 	ld		b, MAX_SECT_BUF * ViewFileConvertRatioText
-	call	ReadFileSection					;DE = last address read
+	call		ReadFileForViewing
+	jp		ViewFileText
 	
-	ld		ix, (SelFileCache)	
-	ld		a, BYTE_TYPE
-	cp		(ix + CACHE_HDR + HDR_TYPE)	
-	ld		hl, FileData+HDR_SZ
-	jr		nc, ViewFileWithHeader
-	ld		hl, FileData
-	
-ViewFileWithHeader:	
-	;Calculate size of read buffer
-	push	hl
-		ex	de, hl
-		or	a
-		sbc	hl, de
-		ld	b, h
-		ld	c, l
-	pop		hl	
-	jp		ViewFileAsText
-	
-ViewBytesFile:
-	ld		hl, 0
-	ld		(FilePosRead), hl
-	ld		hl, (SelFileCache)	
-	ld 		a, (RWTSDrive)
-	inc		a
+ViewFileAsHex:
 	ld		b, MAX_SECT_BUF/ViewFileConvertRatioHEX
-	call	ReadFileSection					;DE = last address read
-	ld		hl, FileData + HDR_SZ	
+	call		ReadFileForViewing
+	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioHEX
+	push		de	
+		call	Bin2HexStr			
+	pop		hl
+	;Determine lenght of hex print buffer.
 	ex		de, hl
 	or		a
 	sbc		hl, de
 	ld		b, h
 	ld		c, l
+	ex		de, hl
+	jr		ViewFileText
 	
-	;Determine if read buffer was bigger than logical length and set BC to logical length if so.
+	
+ViewFileAsBASIC:		
+	ld		b, MAX_SECT_BUF/ViewFileConvertRatioBASIC		;Load half of available RAM with program bytecode, leave half for decoded text.
+	call		ReadFileForViewing						
+	ld		ix, (SelFileCache)		
+
+	;Read program length from header.
+	ld		c, (ix + CACHE_HDR + HDR_PLEN)
+	ld		b, (ix + CACHE_HDR + HDR_PLEN + 1)
+	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC		;Store text of program after read block.
+	push		de	
+		call	BASIC2TXT			
+	pop		de	
+	;Get decoded text length	
+	ld		hl, (DestinationAddr)		
+	ld		a, CHAR_EOF
+	ld		(hl), a								;Force EOF char at end of decoded basic program.
+	inc		hl	
+	or		a
+	sbc		hl, de
+	ld		b, h
+	ld		c, l
+	ex		de, hl
+	
+ViewFileText:	
+	push	hl
+	push	bc
+		call	ClrScr	
+	pop	bc
+	pop	hl
+	call	TextViewer	
+	ret
+
+
+;Reads file section, as much as it fits in RAM for the type of output.
+;Returns HL=start address and BC=length read (if it didn't fit in RAM) or logical length.
+;IN: B = how many sectors to read.
+ReadFileForViewing:
+	ld		hl, 0
+	ld		(FilePosRead), hl
+	ld		hl, (SelFileCache)	
+	ld 		a, (RWTSDrive)
+	inc		a
+	call		ReadFileSection		;DE = last address read
+
+	;Calculate size of read buffer.
+	ld	hl, FileData
+	ex	de, hl
+	or	a
+	sbc	hl, de
+	ld	b, h
+	ld	c, l
+	
+	;Check file type from header, to see if header exists or not.
 	ld		ix, (SelFileCache)	
+	ld		a, (ix + CACHE_HDR + HDR_TYPE)
+	cp		TEXT_TYPE	
+	ld		hl, FileData
+	jr		nc, ReadFileForViewingNoHeader
+
+	;Determine if read buffer was bigger than logical length and set BC to logical length if so (size on disk might be bigger). 
+	;Else, file didn't fit in RAM, keep length that was read (smaller than real file size).	
 	ld		l, (ix + CACHE_HDR + HDR_LEN)
 	ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
 	or		a
 	sbc		hl, bc
-	jr		nc, LogicalLenIsBiggerThanRead
+	jr		nc, ReadFileForViewingUseReadLenght
+
 	ld		c, (ix + CACHE_HDR + HDR_LEN)
 	ld		b, (ix + CACHE_HDR + HDR_LEN + 1)
 	
-LogicalLenIsBiggerThanRead:	
-	ex		de, hl
-	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioHEX
-	push	de
-	
-		call	Bin2HexStr		
+ReadFileForViewingUseReadLenght:
+	ld		hl, FileData+HDR_SZ
 
-	;Get hex print len.	
-	ex		de, hl
-	pop		de
-	or		a
-	sbc		hl, de
-	ld		b, h
-	ld		c, l
-	ex		de, hl
-	jr		ViewFileAsText
-	
-	
-ViewProgramFile:	
-	ld		hl, 0
-	ld		(FilePosRead), hl
-	ld		hl, (SelFileCache)	
-	ld 		a, (RWTSDrive)
-	inc		a
-	ld		b, MAX_SECT_BUF/ViewFileConvertRatioBASIC				;Load half of available RAM with program bytecode, leave half for decoded text.
-	call	ReadFileSection					;DE = last address read
-	ld		hl, FileData
-	ld		a, CHAR_CR
-	inc		de
-	ld		(de), a
+ReadFileForViewingNoHeader:
 
-	ld		ix, (SelFileCache)
-	ld		c, (ix + CACHE_HDR + HDR_PLEN)
-	ld		b, (ix + CACHE_HDR + HDR_PLEN + 1)
-	ld		hl, FileData + HDR_SZ												;Read program bytecode after the header.
-	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC		;Store text of program after read block.
-	push	de	
-		call	BASIC2TXT			
-	pop		hl
-	
-	;Get decoded text length
-	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC
-	ld		hl, (DestinationAddr)		
-	ld		a, CHAR_EOF
-	ld		(hl), a								;Force EOF char at end of decoded basic program.
-	inc		hl
-	push	de
-		or	a
-		sbc	hl, de
-		ld	b, h
-		ld	c, l
-	pop		hl	
-	
-ViewFileAsText:	
-	push	hl
-	push	bc
-		call	ClrScr	
-	pop		bc
-	pop		hl
-	call	TextViewer	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1150,7 +1170,10 @@ DisplayFileInfo:
 		;disk size - at least 2KB ==1  AU
 		ld		bc, CACHE_AU_CNT
 		add		hl, bc
-		ld		de, (hl)
+		ld		e, (hl)
+		inc		hl
+		ld		d, (hl)
+		dec		hl
 		ex		de, hl				
 		;*2, since one block (AU) is 2KB.
 		rl	l
@@ -1173,22 +1196,26 @@ DisplayFileInfo:
 		jr		z, NotRO
 
 		ld		bc, '/R'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 		ld		bc, ',O'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 		jr		CheckSys
 NotRO:
 		ld		bc, '--'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 		ld		bc, ',-'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 
 CheckSys:
@@ -1198,16 +1225,18 @@ CheckSys:
 		jr		z, NotSYS
 
 		ld		bc, 'IH'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 		ld		a, 'D' + $80
 		ld		(hl), a
 		jr		AttrEnd
 NotSYS:
 		ld		bc, '--'
-		ld		(hl), bc
+		ld		(hl), c
 		inc		hl
+		ld		(hl), b
 		inc		hl
 		ld		a, '-' + $80
 		ld		(hl), a
@@ -1491,6 +1520,10 @@ MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
 MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
 MsgAreYouSure	DEFM	'Are you sure?y/', 'n' | $80
 MsgFileLoading	DEFM	'Reading file..', '.' | $80
+MsgViewFileMenu	DEFM	'View file menu', ':' | $80
+MsgViewFileText	DEFM	'1.As tex', 't' | $80
+MsgViewFileHex	DEFM	'2.As he', 'x' | $80
+MsgViewFileAuto	DEFM	'3.Auto-1/2/BASI', 'C' | $80
 
 	IFNDEF	_REAL_HW_
 FontTable:	
@@ -1538,8 +1571,9 @@ TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096
 
 ;File viewer constants
 FileData		EQU		DataBuf
+;4K index allows for 2000 lines of text.
+FileIdxSize		EQU		4	 * 1024
 ;File buffer size, without index
-FileIdxSize		EQU		5	 * 1024
 FileDataSize	EQU		(MAX_SECT_RAM * SECT_SZ) - FileIdxSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize

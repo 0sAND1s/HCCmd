@@ -192,16 +192,24 @@ TextViewIndex:
 	ld		(LineCount), de
 	
 TextViewIndexLoop:	
-	ld		(ix), hl	
+	ld		(ix), l	
+	ld		(ix+1), h
 	
 	ld		bc, COL_CNT			;Search CR char, might be on position 65.
 	ld		a, CHAR_CR
 	cpir		
+	
+	ld		a, CHAR_CR			;Don't show an empty line if the CR char is exactly after 64 chars.
+	cp		(hl)
+	jr		nz, TextViewCheckLF
+	inc		hl
 				
+TextViewCheckLF:				
 	ld		a, CHR_LF
 	cp		(hl)
 	jr		nz, TextViewIndexNoLF	
 	inc		hl						;Skip LF char.
+	
 TextViewIndexNoLF:
 		
 	;If line shorter than 64 chars, calculate actual length.
@@ -243,7 +251,8 @@ TextViewerEnd:
 		
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PrintOneLine:
-	ld		hl, (ix)	
+	ld		l, (ix)	
+	ld		h, (ix+1)
 	ld		a, (ix+2)	
 		
 	or		a

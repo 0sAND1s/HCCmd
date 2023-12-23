@@ -1,4 +1,5 @@
-	DEVICE	ZXSPECTRUM48
+	IFNDEF _BAS2TXT_
+	DEFINE _BAS2TXT_
 
 CHANS		EQU		23631
 CH_LEN		EQU		5
@@ -28,7 +29,9 @@ BASIC2TXT:
 	ld	 bc, CH_LEN * CHANNEL
 	add	 hl, bc
 	ld   de, OutputFnct
-	ld   (hl), de
+	ld   (hl), e
+	inc	hl
+	ld	(hl), d
 	
 	ld	hl, (ProgramStartAddr)	
 
@@ -176,3 +179,5 @@ LineEndAddr			DEFW 0
 ProgramStartAddr	DEFW 0
 ProgramEndAddr		DEFW 0
 DestinationAddr		DEFW 0
+
+	ENDIF
