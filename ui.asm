@@ -74,7 +74,7 @@ KEY_LEFT		EQU	8
 KEY_RIGHT		EQU	9
 KEY_DOWN		EQU	10
 KEY_UP			EQU	11
-KEY_BACKSP		EQU 12
+KEY_BACKSP		EQU	12
 KEY_ENTER		EQU	13
 KEY_CTRL		EQU	14
 
@@ -97,8 +97,8 @@ CHR_TAB			EQU	09
 ;     LL +--+--+LR
 ;           DC
 CHR_GRID        EQU 127
-CHR_V           EQU	128
-CHR_MR          EQU	129
+CHR_V           EQU 128
+CHR_MR          EQU 129
 CHR_UR          EQU 130
 CHR_DL          EQU 131
 CHR_DC          EQU 132
@@ -517,7 +517,7 @@ ReadStringLoop:
 ReadStrChar:
 	cp	' '
 	jr	c, ReadStringLoop
-	cp  127
+	cp	CHR_HALF
 	jr	nc, ReadStringLoop
 	
 	;Check end of string and go back if found.	

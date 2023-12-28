@@ -4,14 +4,14 @@
 LINE_CNT	EQU	23
 COL_CNT		EQU	64
 
-CHAR_CR		EQU	$0D
-CHAR_LF		EQU	$0A
+CHAR_CR	EQU	$0D
+CHAR_LF	EQU	$0A
 CHAR_TAB	EQU	$09
 CHAR_EOF	EQU	$1A
 
-COORDS		EQU	23728		;Coordinates
-SCRLinesDown	EQU PRN_BUF
-SCRLinesUp		EQU	SCRLinesDown + LINE_CNT*2
+COORDS		EQU	23728	;Coordinates
+SCRLinesDown	EQU	PRN_BUF
+SCRLinesUp	EQU	SCRLinesDown + LINE_CNT*2
 
 
 	include "scroll.asm"
@@ -20,312 +20,373 @@ SCRLinesUp		EQU	SCRLinesDown + LINE_CNT*2
 TextViewer:	
 	call	TextViewIndex
 	
-	ld		hl, 0
-	ld		(COORDS), hl		
+	ld	hl, 0
+	ld	(COORDS), hl			
 	call	ScrollInit	
+		
+	;Check if we have in file 23 lines or less.
+	ld	hl, (LineCount)
+	ld	bc, LINE_CNT
+	or	a
+	sbc	hl, bc	
+	ld	b, LINE_CNT
+	jr	nc, MoreThan23LinesInFile
 	
-TextViewerLoop2:	
-	;Display 23 lines or less.
-	ld		hl, (LineCount)
-	ld		bc, LINE_CNT
-	or		a
-	sbc		hl, bc	
-	ld		b, LINE_CNT
-	jr		nc, MoreThan23LinesInFile
-	ld		hl, (LineCount)
-	ld		b, l
+	;If file has less than 23 lines, show only lines 0 to line count-1.
+	ld	hl, (LineCount)
+	ld	b, l
+	dec	hl
+	ld	de, 0
+	jr	TextViewerShowBegining
+	
 MoreThan23LinesInFile:	
-	ld		ix, FileIdx
+	;Check last key pressed to see if we need to show last part of file or the first part.
+	ld	a, (LAST_K)
+	cp	KEY_UP
+	ld	de, 0
+	ld	hl, LINE_CNT-1
+	jr	nz, TextViewerShowBegining	
+	
+	;Must show end of file.
+	ld	hl, (LineCount)
+	dec	hl
+	push	hl
+	push	bc
+		ld	bc, LINE_CNT-1
+		or	a
+		sbc	hl, bc
+		ld	d, h
+		ld	e, l
+	pop	bc
+	pop	hl
+	
+TextViewerShowBegining:	
+	ld	(LastLineShown), hl
+	ld	(FirstLineShown), de
+	
+	;If first line is 0, don't need to add offset.
+	ld	a, d
+	or	e
+	ld	ix, FileIdx
+	jr	z, TextViewerLoop
+	
+	;Get pointer to the first line index.
+	ld	a, 3
+	push	bc
+	push	hl
+		call	Mul
+		ld	b, h
+		ld	c, l
+		add	ix, bc
+	pop	hl
+	pop	bc		
 
 ;Display first screen of text.
 TextViewerLoop:	
 	push	bc		
 		call	PrintOneLine
-		inc		ix
-		inc		ix
-		inc		ix
+		inc	ix
+		inc	ix
+		inc	ix
 		
-		ld		de, (COORDS)
-		inc		d
-		ld		e, 0
-		ld		(COORDS), de	
-	pop		bc	
+		ld	de, (COORDS)
+		inc	d
+		ld	e, 0
+		ld	(COORDS), de	
+	pop	bc	
 	djnz	TextViewerLoop	
-		
-	ld		de, 0
-	ld		(FirstLineShown), de
+			
+	dec	ix
+	dec	ix
+	dec	ix
 	
-	dec		ix
-	dec		ix
-	dec		ix
-	
-	ld		hl, (LineCount)		
-	ld		de, MsgLineTotal
+	ld	hl, (LineCount)		
+	ld	de, MsgLineTotal
 	call	Word2Txt
 	
-TextViewerLoop3:			
-	ld		hl, (FirstLineShown)		
-	inc		hl	
-	ld		de, MsgLineNo
+TextViewerLoop3:		
+	ld	hl, (LastLineShown)	
+	inc	hl
+	ld	de, MsgLineNo
 	call	Word2Txt
+	ld	a, (ViewFilePart)
+	inc	a
+	ld	l, a
+	ld	h, 0
+	ld	de, MsgFilePart
+	call	Byte2Txt
 	
-	ld		hl, (SelFileCache)
-	ld		de, MsgLineFileName
-	ld		b, NAMELEN
+	ld	hl, (SelFileCache)
+	ld	de, MsgLineFileName
+	ld	b, NAMELEN
 TextViewerShowFilename:	
-	ld		a, (hl)
-	and		$7F
-	ld		(de), a
-	inc		hl
-	inc		de
+	ld	a, (hl)
+	and	$7F
+	ld	(de), a
+	inc	hl
+	inc	de
 	djnz	TextViewerShowFilename
 
-	ld		hl, MsgLine		
-	ld		de, LINE_CNT << 8
-	ld		a, SCR_SEL_CLR
+	ld	hl, MsgLine		
+	ld	de, LINE_CNT << 8
+	ld	a, SCR_SEL_CLR
 	call	PrintStrClr
 	
 	call	ReadChar
 	
-	cp		KEY_DOWN
-	jr		z, TextViewerScrollDown
+	cp	KEY_DOWN
+	jr	z, TextViewerScrollDown
+	cp	'a'
+	jr	z, TextViewerScrollDown
 	
-	cp		KEY_UP
-	jr		z, TextViewerScrollUp
+	cp	KEY_UP
+	jr	z, TextViewerScrollUp
+	cp	'q'
+	jr	z, TextViewerScrollUp
 	
-	cp		'0'
-	ret		z
+	cp	'0'
+	ret	z
 	
-	jr		TextViewerLoop3
+	jr	TextViewerLoop3
 	
 TextViewerScrollUp:	
 	;Do nothing if showing begining of file.
-	ld		de, (FirstLineShown)
-	ld		a, d
-	or		e
-	jr		z, TextViewerLoop3	
+	ld	de, (FirstLineShown)
+	ld	a, d
+	or	e
+	jr	nz, TextViewerScrollUpOK
 	
-	dec		de
-	ld		(FirstLineShown), de
+	ld	a, (ViewFilePart)
+	or	a
+	jr	z, TextViewerLoop3
+	ret
 	
-	ld		a, d
-	or		e
-	ld		ix, FileIdx
-	jr		z, TextViewerScrollUp1
+TextViewerScrollUpOK:	
+	dec	de
+	ld	(FirstLineShown), de
+	
+	ld	hl, (LastLineShown)
+	dec	hl
+	ld	(LastLineShown), hl
+	
+	ld	a, d
+	or	e
+	ld	ix, FileIdx
+	jr	z, TextViewerScrollUp1
 
-	;3*FirstLineShown						
-	ld		a, 3
+	;3*FirstLineShown					
+	ld	a, 3
 	call	Mul	
-	ex		de, hl	
-	or		a
-	add		ix, de
+	ex	de, hl	
+	or	a
+	add	ix, de
 	
 
 TextViewerScrollUp1:
 	call	ScrollUp	
-	ld		de, (COORDS)
-	ld		de, 0	
-	ld		(COORDS), de					
+	ld	de, (COORDS)
+	ld	de, 0	
+	ld	(COORDS), de
 	call	PrintOneLine	
 	
-	jr		TextViewerLoop3
+	jp	TextViewerLoop3
 	
 TextViewerScrollDown:	
-	;Exit if reached last line from file.
-	ld		hl, (FirstLineShown)		
-	ld		bc, LINE_CNT+1
-	or		a
-	adc		hl, bc
-	ex		de, hl
-	ld		hl, (LineCount)
-	or		a
-	sbc		hl, de
-	jr		c, TextViewerLoop3
+	;Exit if reached last line from file and more data is available for reading.
+	ld	de, (LastLineShown)
+	inc	de
+	ld	hl, (LineCount)
+	or	a
+	sbc	hl, de
+	ld	a, h
+	or	l
+	jr	nz, TextViewerScrollDown1
 	
-	ld		hl, (FirstLineShown)
-	inc		hl
-	ld		(FirstLineShown), hl
-	ld		bc, LINE_CNT-1
-	or		a
-	adc		hl, bc
-	ex		de, hl
+	;Exit if not end of file.
+	ld	a, (CopyFileRes)
+	or	a
+	jp	nz, TextViewerLoop3
+	ret
+	
+TextViewerScrollDown1:
+	ld	(LastLineShown), de
+	
+	ld	hl, (FirstLineShown)
+	inc	hl
+	ld	(FirstLineShown), hl		
 
-	;(FirstLineShown + 23	) * 3
-	ld		a, 3
+	;Index of next line = LastLineShown * 3
+	ld	a, 3
 	call	Mul
-	ex		de, hl
-	ld		ix, FileIdx
-	add		ix, de
+	ex	de, hl
+	ld	ix, FileIdx
+	add	ix, de
 
 	call	ScrollDown
-	ld		de, (COORDS)
-	ld		de, (LINE_CNT - 1) << 8	
-	ld		(COORDS), de
-				
-	call	PrintOneLine
-		
-	jp		TextViewerLoop3	
+	ld	de, (COORDS)
+	ld	de, (LINE_CNT - 1) << 8	
+	ld	(COORDS), de
+			
+	call	PrintOneLine		
+	jp	TextViewerLoop3	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	
 ;Creates line start indexes, with 2 byte address and 1 byte length for each line. Stores total line count.
 ;IN: HL=start address, BC: length
 TextViewIndex:
-	ld		ix, FileIdx
+	ld	ix, FileIdx
 	
-	;Search for CHAR_EOF, to mark end of buffer there, if found.
 	;Save initial length in DE.	
 	push	hl
-		push	bc
-			ld		a, CHAR_EOF
-			cpir
-			
-			push	hl
-			pop		de				;DE will contain the address of EOF char or end of file.
-		pop		bc
-	pop		hl			
+		or	a
+		adc	hl, bc
+		ex	de, hl
+	pop	hl		
 	
-	dec		de
-	ld		(FileEnd), de
+	ld	(FileEnd), de
 	
-	ld		de, 0					;Assume at least one line is shown, even if empty.
-	ld		(LineCount), de
+	ld	de, 0				;Assume at least one line is shown, even if empty.
+	ld	(LineCount), de
 	
 TextViewIndexLoop:	
-	ld		(ix), l	
-	ld		(ix+1), h
+	ld	(ix), l	
+	ld	(ix+1), h
 	
-	ld		bc, COL_CNT			;Search CR char, might be on position 65.
-	ld		a, CHAR_CR
-	cpir		
+	;BC to hold 64 or less, if on last line from file.
+	ld	de, (FileEnd)
+	ex	de, hl
+	or	a
+	sbc	hl, de	
+	ret	z
 	
-	ld		a, CHAR_CR			;Don't show an empty line if the CR char is exactly after 64 chars.
-	cp		(hl)
-	jr		nz, TextViewCheckLF
-	inc		hl
+	push	hl
+		ld	bc, COL_CNT
+		or	a
+		sbc	hl, bc
+		ex	de, hl
+	pop	de
+	ld	a, c
+	jr	nc, TextViewLineShort
+	ld	a, e
+	
+TextViewLineShort:			
+	ld	e, a		;Save line lenght.
+	
+	;Must detect if line is shorter because of CR.
+	ld	c, a
+	ld	a, CHAR_CR
+	cpir
+	jr	nz, TextViewNotFoundCR
+	inc	c
+	
+TextViewNotFoundCR:	
+	ld	a, e
+	sub	c	
+	ld	(ix+2), a	
+		
+	ld	a, CHAR_CR	;Don't show an empty line if the CR char is exactly after 64 chars.
+	cp	(hl)
+	jr	nz, TextViewCheckLF
+	inc	hl
 				
 TextViewCheckLF:				
-	ld		a, CHR_LF
-	cp		(hl)
-	jr		nz, TextViewIndexNoLF	
-	inc		hl						;Skip LF char.
-	
-TextViewIndexNoLF:
+	ld	a, CHR_LF
+	cp	(hl)
+	jr	nz, TextViewNoLF
+	inc	hl					;Skip LF char.
+TextViewNoLF:
 		
-	;If line shorter than 64 chars, calculate actual length.
-	ld		a, c	
-	or		a						;if c==0, line was 64 chars
-	ld		a, COL_CNT	
-	jr		z, TextViewIndexStoreLineLen			
-	inc		c						;account for the CR char found.
-	sub		c		
-	
-TextViewIndexStoreLineLen:	
-	ld		(ix+2), a	
-	ld		de, (LineCount)
-	inc		de
-	ld		(LineCount), de
-	
-	;Check end of file.				
-	ld		a, CHAR_EOF
-	cp		(hl)		
-	ret		z
-
-TextViewerIncrementIndex:		
 	;Point to the next index position.
-	inc		ix
-	inc		ix
-	inc		ix			
-		
-TextViewerCheckEnd:	
-	push	hl
-		ex		de, hl
-		ld		hl, (FileEnd)
-		or		a
-		sbc		hl, de		
-	pop		hl
-	jr		nc, TextViewIndexLoop
+	ld	bc, (LineCount)
+	inc	bc
+	ld	(LineCount), bc
+	
+	inc	ix
+	inc	ix
+	inc	ix	
+	jr	 TextViewIndexLoop
 
-TextViewerEnd:	
-	ret
-		
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PrintOneLine:
-	ld		l, (ix)	
-	ld		h, (ix+1)
-	ld		a, (ix+2)	
+	ld	l, (ix)	
+	ld	h, (ix+1)
+	ld	a, (ix+2)	
 		
-	or		a
-	ld		b, COL_CNT
-	jr		z, PrintOneLineCleanLine
+	or	a
+	ld	b, COL_CNT
+	jr	z, PrintOneLineCleanLine
 	
-	ld		b, a
+	ld	b, a
 PrintOneLineLoop:	
-	ld		a, (hl)	
+	ld	a, (hl)	
 	
 	;Put space instead of tab
-	cp		CHAR_TAB
-	jr		nz, PrintOneLineNotTab
-	ld		a, ' '
+	cp	CHAR_TAB
+	jr	nz, PrintOneLineNotTab
+	ld	a, ' '
 	
 PrintOneLineNotTab:	
 	push	hl
 		cp	' '
 		jr	c, PrintCharNotValid
-		cp  127
+		cp	CHR_HALF
 		jr	nc, PrintCharNotValid
 		
 		jr	PrintCharValid	
 PrintCharNotValid:	
 		ld	a, '.'
 PrintCharValid:
-		ld		(CODE), a
-		push	bc			
-			call	PrintChar			
-		pop		bc
+		ld	(CODE), a
+		push	bc		
+			call	PrintChar		
+		pop	bc
 
-		ld		de, (COORDS)
-		inc		e
-		ld		(COORDS), de
-	pop		hl
-	inc		hl
+		ld	de, (COORDS)
+		inc	e
+		ld	(COORDS), de
+	pop	hl
+	inc	hl
 	djnz	PrintOneLineLoop
 		
 	;Fill rest of line with spaces.
-	ld		b, (ix+2)
-	ld		a, COL_CNT
-	cp		b
-	ret		z
+	ld	b, (ix+2)
+	ld	a, COL_CNT
+	cp	b
+	ret	z
 	
-	or		a
-	sbc		b
-	ld		b, a		
+	or	a
+	sbc	b
+	ld	b, a		
 		
 PrintOneLineCleanLine:		
-	ld		a, ' '
-	ld		(CODE), a
-	push	bc			
+	ld	a, ' '
+	ld	(CODE), a
+	push	bc		
 		call	PrintChar	
-		ld		de, (COORDS)
-		inc		e
-		ld		(COORDS), de		
-	pop		bc
+		ld	de, (COORDS)
+		inc	e
+		ld	(COORDS), de		
+	pop	bc
 	djnz	PrintOneLineCleanLine
 	
 	ret	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-FileEnd			DEFW	0
-LineCount		DEFW	0
+FileEnd		DEFW	0
+LineCount	DEFW	0
 FirstLineShown	DEFW	0
+LastLineShown	DEFW	0
 	
-MsgLine			defb	'File: '
+MsgLine	defb	'File:'
 MsgLineFileName defb 	'           |'
-				defb	'Line: '
-MsgLineNo		defb	'     /'
+		defb	'Line:'
+MsgLineNo	defb	'     /'
 MsgLineTotal	defb	'     |'
-				defs	21, ' '
-				defb	'|0:Exi', 't' | $80
+		defb	'Segment:'
+MsgFilePart	defb	'   |'
+		defs	10, ' '
+		defb	'|0:Exi', 't' | $80
 	
 	ENDIF

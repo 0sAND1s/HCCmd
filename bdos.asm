@@ -716,11 +716,7 @@ ReadFileSection:
 	;Limit max sectors to read to leave space for the index too.
 	push	af		
 		ld		a, b
-		ld		(CopyFileSectCnt), a
-		push	bc
-		exx
-		pop		bc
-		exx
+		ld		(CopyFileSectCnt), a		
 	pop		af
 	jr		ReadWriteFileSection
 
@@ -740,10 +736,10 @@ WriteFileSection:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 ReadWriteFileSection:			
 	call	CreateChannel	
-	ld		(CopyFileFCB), ix	
+	ld	(CopyFileFCB), ix	
 	call 	BDOSOpenFile		
 	inc  	a						;Cancel if A==$FF
-	ret		z			
+	ret	z			
 	
 	;Set DMA initial pointer = FileData
 	push	ix
@@ -783,16 +779,14 @@ CopyFileOperAddr2 EQU $ + 1
 		ld		(CopyFileRes), a				
 	pop		bc	
 	or		a		
-	jr		nz, ReadWriteFileSectionEnd		;Exit on read/write error.
+	jr		nz, ReadWriteFileSectionEnd	;Exit on read/write error.
 	djnz	ReadWriteFileSectionLoop		;Exit on buffer full.
 			
 ReadWriteFileSectionEnd:
 	;Update sector count variable with how many sectors were transfered.
-	exx		
-	ld		a, b
-	exx	
-	sub		b							;Substract the number of sectors left to read when EOF was encountered or buffer ended.			
-	ld		(CopyFileSectCnt), a		;Store the number of sectors actually read.
+	ld		a, (CopyFileSectCnt)
+	sub		b				;Substract the number of sectors left to read when EOF was encountered or buffer ended.			
+	ld		(CopyFileSectCnt), a		;Store the number of sectors actualy read.
 
 	;Update random access file pointer with the last read value, before file ended or before RAM buffer ended.		
 	call	BDOSSetRandFilePtr
@@ -805,7 +799,7 @@ CopyFilePtr2 EQU $+2
 	call 	DestroyChannel
 		
 	ld		de, (CopyFileDMAAddr)
-	dec		d
+	;dec		d
 	ret
 
 	ENDIF

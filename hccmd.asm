@@ -1031,20 +1031,26 @@ ViewFileConvertRatioASM		EQU	3				;Disassembly is expanded as 1:3? To test!
 ;Skip header, if exists.
 
 ViewFile:
-	push		af				;Save file menu choice.
-
-		ld		hl, MsgFileLoading
-		ld		de, LST_LINE_MSG + 1 << 8
-		ld		a, SCR_DEF_CLR | CLR_FLASH
-		call		PrintStrClr
-
-		;Read file header if not yet read.
-		ld		ix, (SelFileCache)
-		ld		a, (ix + CACHE_FLAG)
-		or		a
-		call		z, ReadFileHeader
-
-	pop		af
+	ld	hl, 0
+	ld	(FilePosRead), hl
+	ld	(ViewSelOption), a
+	xor	a
+	ld	(ViewFilePart), a
+	ld	ix, FileBlocksIdx
+	ld	hl, 0
+	ld	(ix), l
+	ld	(ix+1), h
+	ld	(FileBlocksIdxPos), ix
+	
+	;Read file header if not yet read.
+	ld		ix, (SelFileCache)
+	ld		a, (ix + CACHE_FLAG)
+	or		a
+	call		z, ReadFileHeader
+	
+ViewFileNextBlock:			
+	ld		a, (ViewSelOption)
+	
 	cp		'1'
 	jr		z, ViewFileAsText
 
@@ -1064,7 +1070,7 @@ ViewFileAuto:
 ViewFileAsText:
 	;If text file, load as much as possible to RAM.
 	ld		b, MAX_SECT_BUF * ViewFileConvertRatioText
-	call		ReadFileForViewing
+	call		ReadFileForViewing	
 	jp		ViewFileText
 	
 ViewFileAsHex:
@@ -1086,10 +1092,11 @@ ViewFileAsHex:
 	
 ViewFileAsBASIC:		
 	ld		b, MAX_SECT_BUF/ViewFileConvertRatioBASIC		;Load half of available RAM with program bytecode, leave half for decoded text.
-	call		ReadFileForViewing						
-	ld		ix, (SelFileCache)		
-
-	;Read program length from header.
+	call		ReadFileForViewing								
+	;Read program length from header. Skip file header.
+	ld		bc, HDR_SZ
+	add		hl, bc
+	ld		ix, (SelFileCache)
 	ld		c, (ix + CACHE_HDR + HDR_PLEN)
 	ld		b, (ix + CACHE_HDR + HDR_PLEN + 1)
 	ld		de, FileData + MAX_SECT_BUF*SECT_SZ/ViewFileConvertRatioBASIC		;Store text of program after read block.
@@ -1098,9 +1105,6 @@ ViewFileAsBASIC:
 	pop		de	
 	;Get decoded text length	
 	ld		hl, (DestinationAddr)		
-	ld		a, CHAR_EOF
-	ld		(hl), a								;Force EOF char at end of decoded basic program.
-	inc		hl	
 	or		a
 	sbc		hl, de
 	ld		b, h
@@ -1113,53 +1117,101 @@ ViewFileText:
 		call	ClrScr	
 	pop	bc
 	pop	hl
-	call	TextViewer	
-	ret
-
+	push	hl
+		call	TextViewer	
+	pop	hl
+	
+ViewFileTextLoop:	
+	ld	a, (LAST_K)
+	
+	cp	'0'
+	ret	z
+	
+	cp	KEY_UP
+	jr	nz, ViewFileTextLoopDown
+	
+	ld	a, (ViewFilePart)
+	or	a
+	jr	z, ViewFileTextLoop
+	
+	dec	a
+	ld	(ViewFilePart), a
+	
+	;Go back 1 block index.
+	ld	ix, (FileBlocksIdxPos)
+	dec	ix
+	dec	ix
+	ld	l, (ix)
+	ld	h, (ix+1)
+	ld	(FilePosRead), hl
+	ld	(FileBlocksIdxPos), ix
+	jp	ViewFileNextBlock
+	
+	
+ViewFileTextLoopDown:	
+	cp	KEY_DOWN
+	jr	nz, ViewFileTextLoop
+	
+	ld	hl, ViewFilePart
+	inc	(hl)	
+		
+	;Save file index for when scrolling back.
+	ld	ix, (FileBlocksIdxPos)
+	inc	ix
+	inc	ix
+	ld	hl, (FilePosRead)
+	ld	(ix), l
+	ld	(ix+1), h	
+	ld	(FileBlocksIdxPos), ix
+	jp	ViewFileNextBlock
+	
 
 ;Reads file section, as much as it fits in RAM for the type of output.
-;Returns HL=start address and BC=length read (if it didn't fit in RAM) or logical length.
+;Returns HL=start address and BC=length read.
 ;IN: B = how many sectors to read.
 ReadFileForViewing:
-	ld		hl, 0
-	ld		(FilePosRead), hl
 	ld		hl, (SelFileCache)	
+	ld		a, b
+	ld		(ViewSectMax), a
 	ld 		a, (RWTSDrive)
 	inc		a
 	call		ReadFileSection		;DE = last address read
 
 	;Calculate size of read buffer.
-	ld	hl, FileData
-	ex	de, hl
-	or	a
-	sbc	hl, de
-	ld	b, h
-	ld	c, l
+	push		de
+		ld		hl, FileData
+		ex		de, hl
+		or		a
+		sbc		hl, de
+		ld		b, h
+		ld		c, l
+	pop		de
 	
 	;Check file type from header, to see if header exists or not.
 	ld		ix, (SelFileCache)	
 	ld		a, (ix + CACHE_HDR + HDR_TYPE)
 	cp		TEXT_TYPE	
-	ld		hl, FileData
-	jr		nc, ReadFileForViewingNoHeader
-
-	;Determine if read buffer was bigger than logical length and set BC to logical length if so (size on disk might be bigger). 
-	;Else, file didn't fit in RAM, keep length that was read (smaller than real file size).	
-	ld		l, (ix + CACHE_HDR + HDR_LEN)
-	ld		h, (ix + CACHE_HDR + HDR_LEN + 1)
-	or		a
-	sbc		hl, bc
-	jr		nc, ReadFileForViewingUseReadLenght
-
-	ld		c, (ix + CACHE_HDR + HDR_LEN)
-	ld		b, (ix + CACHE_HDR + HDR_LEN + 1)
+	jr		c, ReadFileForViewingNotText
 	
-ReadFileForViewingUseReadLenght:
-	ld		hl, FileData+HDR_SZ
+	;Find EOF for text files and ajust lenght.
+	ld		hl, FileData
+	ld		d, b
+	ld		e, c
+	ld		a, CHAR_EOF
+	cpir
+	jr		nz, ReadFileForViewingNotFoundEOF
+	inc		bc
+ReadFileForViewingNotFoundEOF:	
+	or		a
+	ex		hl, de
+	sbc		hl, bc
+	ld		b, h
+	ld		c, l
 
-ReadFileForViewingNoHeader:
-
+ReadFileForViewingNotText:	
+	ld		hl, FileData
 	ret
+	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1519,7 +1571,6 @@ MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
 MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
 MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
 MsgAreYouSure	DEFM	'Are you sure?y/', 'n' | $80
-MsgFileLoading	DEFM	'Reading file..', '.' | $80
 MsgViewFileMenu	DEFM	'View file menu', ':' | $80
 MsgViewFileText	DEFM	'1.As tex', 't' | $80
 MsgViewFileHex	DEFM	'2.As he', 'x' | $80
@@ -1541,8 +1592,12 @@ AUCntUsed		EQU		CursorAddr + 2			;2 B
 AUCntMaxFree	EQU		AUCntUsed + 2			;2 B
 SelFileCache	EQU		AUCntMaxFree + 2		;2 B
 CopySelOption	EQU		SelFileCache+2			;1 B
+ViewSelOption	EQU		CopySelOption + 1
+ViewSectMax	EQU		ViewSelOption + 1
+ViewFilePart	EQU		ViewSectMax+1
+FileBlocksIdxPos EQU		ViewFilePart+1
 
-CopyFileFCB		EQU	CopySelOption + 1
+CopyFileFCB		EQU	FileBlocksIdxPos + 2
 CopyFileRes		EQU CopyFileFCB + 2
 CopyFileDMAAddr	EQU	CopyFileRes + 1
 FilePosRead		EQU	CopyFileDMAAddr + 2
@@ -1572,11 +1627,13 @@ TrackBuf		EQU		DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU		DataBuf
 ;4K index allows for 2000 lines of text.
-FileIdxSize		EQU		4	 * 1024
+FileIdxSize		EQU		4 * 1024
+FileIdxBlocksSize	EQU		1 * 1024
 ;File buffer size, without index
-FileDataSize	EQU		(MAX_SECT_RAM * SECT_SZ) - FileIdxSize
+FileDataSize	EQU		(MAX_SECT_RAM * SECT_SZ) - FileIdxSize - FileIdxBlocksSize
 ;Set a few KB aside for file indexing
 FileIdx			EQU		FileData + FileDataSize
+FileBlocksIdx		EQU		FileIdx + FileIdxSize
 MAX_SECT_BUF	EQU		FileDataSize/SECT_SZ
 
 
@@ -1588,7 +1645,7 @@ MAX_RAM_FREE	EQU		$FF00 - DataBuf
 MAX_AU_RAM		EQU		MAX_RAM_FREE/AU_SZ
 MAX_SECT_RAM	EQU		MAX_RAM_FREE/SECT_SZ
 
-	DISPLAY "DataBuf: ", /D,DataBuf
+	DISPLAY "DataBuf addr: ", /D,DataBuf
 	DISPLAY "BinSize: ", /D, EndCode - Start
 	DISPLAY "VarSize: ", /D, DataBuf - UnallocStart
 	DISPLAY "MAX_RAM_FREE: ",/D,MAX_RAM_FREE		
