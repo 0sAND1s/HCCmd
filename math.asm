@@ -178,17 +178,6 @@ Bin2HexLine:
 	push	hl
 Bin2HexLineLoopHex:
 		call	Byte2HexHex
-		
-		;Put separator in the middle of hex line.
-		ld	a, HEX_COLUMNS/2+1
-		cp	b
-		jr	nz, Bin2HexLineLoopHexNotHalf
-		dec	de
-		ld	a, CHR_V
-		ld	(de), a
-		inc	de
-		
-Bin2HexLineLoopHexNotHalf:
 		djnz	Bin2HexLineLoopHex	
 	pop	hl
 	
@@ -196,6 +185,10 @@ Bin2HexLineLoopHexNotHalf:
 	ld	a, CHR_V
 	ld	(de), a
 	inc	de
+	
+	ld	ixh, d
+	ld	ixl, e
+	ld	(ix - (HEX_COLUMNS/2)*3 - 1), a
 	
 	;String part
 Bin2HexLineText:	
@@ -247,6 +240,13 @@ Bin2HexStrLoop:
 	jr	nz, Bin2HexStrLoop
 
 	;Set remaining imcomplete line.	
+	;Exit if last line is empty.
+	ex	af, af'	
+	or	a
+	ret	z
+	ex	af, af'
+	
+	;Clear the whole last line.
 	push	de
 	push	hl
 		ld	a, ' '		
@@ -258,17 +258,17 @@ Bin2HexLineClear:
 	pop	hl
 	pop	de	
 	
+	;Save start of last line.
 	push	de
 	pop	ix
+	push	ix
 	
+	;Save start of char part in IX.
 	ld	bc, HEX_COLUMNS*3
-	add	ix, bc
+	add	ix, bc	
 	
-	;Write hex and char part
-	ex	af, af'	
-	or	a
-	ret	z
-	
+	;Write the hex and char parts of line.
+	ex	af, af'
 	ld	b, a	
 	ld	c, HEX_COLUMNS*2
 
@@ -279,15 +279,23 @@ Bin2HexLineLoopHex2:
 	push	de
 		ld	e, ixl
 		ld	d, ixh
+		ld	c, 1
 		call	Byte2HexChar
 	pop	de
+	
 	inc	ix
 	djnz	Bin2HexLineLoopHex2	
 	
+	;Save end of buffer in DE, to let the caller know where the buffer ends.
+	ld	e, ixl
+	ld	d, ixh
+	
+	pop	ix
+	;Write delimiters.
 	ld	a, CHR_V
 	ld	(ix + HEX_COLUMNS*3/2 - 1), a
 	ld	(ix + HEX_COLUMNS*3 - 1), a
-
+		
 	ret		
 
 	endif

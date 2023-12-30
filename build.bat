@@ -4,7 +4,7 @@ SETLOCAL EnableExtensions
 set name=hccmd
 REM Set devel=1 if running on Spectaculator, it will store the fonts in the final binary and won't produce the DSK.
 set devel=0
-set RUN_ADDR=28000
+set RUN_ADDR=25000
 set VAR_START=EndCode
 
 if [%devel%]==[0] (

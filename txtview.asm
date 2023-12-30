@@ -20,6 +20,28 @@ SCRLinesUp	EQU	SCRLinesDown + LINE_CNT*2
 TextViewer:	
 	call	TextViewIndex
 	
+	;Get file size and divide by RAM buffer size, to get total file parts.
+	ld	hl, (SelFileCache)
+	call	GetFileSize
+	;Divide by the buffer size set for the current visualisation type (text/hex).
+	ld	a, (ViewSectMax)
+	ld	d, a
+	ld	e, 0
+	ld	a, h
+	ld	c, l
+	ld	hl, 0
+	call	Div2
+	ex	de, hl
+	ld	h, a
+	ld	l, c
+	ld	a, d
+	or	e
+	jr	z, TextViewerBlockCountNoReminder
+	inc	hl
+	ld	de, MsgFilePartTotal
+	call	Byte2Txt
+	
+TextViewerBlockCountNoReminder:	
 	ld	hl, 0
 	ld	(COORDS), hl			
 	call	ScrollInit	
@@ -384,8 +406,9 @@ MsgLineFileName defb 	'           |'
 		defb	'Line:'
 MsgLineNo	defb	'     /'
 MsgLineTotal	defb	'     |'
-		defb	'Segment:'
-MsgFilePart	defb	'   |'
+		defb	'Part:'
+MsgFilePart	defb	'   /'
+MsgFilePartTotal	defb	'   |'
 		defs	10, ' '
 		defb	'|0:Exi', 't' | $80
 	

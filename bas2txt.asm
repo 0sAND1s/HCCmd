@@ -115,10 +115,19 @@ TestREM:
 	CP   $EA			;RND token
 	JR   NZ, TestQuote1	; A != RND
 
-	;Print CR.
-	LD   A, CHR_CR
+	INC  HL
+TestREMLoop:
+	LD   A, (HL)
 	RST  $10			;PRINT_A_1
-	LD   HL,(LineEndAddr)	;Ingore chars after REM.
+	INC  HL
+	LD   DE,(LineEndAddr)	;Ingore chars after REM.
+	push hl
+	  or  a
+	  sbc hl, de
+	  ld  a, h
+	  or  l
+	pop  hl
+	jr   nz, TestREMLoop
 	JR   NextLine
 
 TestQuote1:
@@ -175,7 +184,7 @@ PrintIt:
 	pop		de
 	ret	
 
-LineEndAddr			DEFW 0
+LineEndAddr		DEFW 0
 ProgramStartAddr	DEFW 0
 ProgramEndAddr		DEFW 0
 DestinationAddr		DEFW 0
