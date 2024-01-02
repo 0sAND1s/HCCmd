@@ -6,24 +6,24 @@
 	include "if1.asm"
 
 BDOSInit:
-	xor		a
-	jr		BDOS
+	xor	a
+	jr	BDOS
 
 
 ;IN: A = Drive to select
 BDOSSelectDisk:
 	IFUSED
-	ld		ixl, a
-	ld		ixh, 0
-	ld		a, 1
-	jr		BDOS
+	ld	ixl, a
+	ld	ixh, 0
+	ld	a, 1
+	jr	BDOS
 	ENDIF
 
 
 BDOSMakeDiskRO:
 	IFUSED
-	ld		a, 15
-	jr		BDOS
+	ld	a, 15
+	jr	BDOS
 	ENDIF
 	
 ;Get Read Only flag
@@ -37,45 +37,45 @@ BDOSGetDiskRO:
 ;OUT: A = 0, 1 or $FF if no drive selected
 BDOSGetCurrentDrive:
 	IFUSED
-	ld		a, 12
-	jr		BDOS
+	ld	a, 12
+	jr	BDOS
 	ENDIF
 
 ;Does log-off for all drives?
 BDOSCloseDrives:
 	IFUSED
-	ld		ixl, a
-	ld		ixh, 0
-	ld		a, 22
-	jr		BDOS
+	ld	ixl, a
+	ld	ixh, 0
+	ld	a, 22
+	jr	BDOS
 	ENDIF
 
 ;Create a disk channel for BDOS access (does not open the file)
 ;IN: HL=name addr, A=drive
 ;OUT: IX=FCB
 CreateChannel:
-	ld (FSTR1), hl
-	ld h,0
-	ld l,a
-	ld (DSTR1), hl
-	ld l,NAMELEN
-	ld (NSTR1), hl
-	rst 08
-	DEFB 55
-	ld bc, CH_FCB			;adjust to get cp/m fcb
-	add ix, bc
+	ld	(FSTR1), hl
+	ld	h,0
+	ld	l,a
+	ld	(DSTR1), hl
+	ld	l,NAMELEN
+	ld	(NSTR1), hl
+	rst	08
+	DEFB	55
+	ld	bc, CH_FCB		;adjust to get cp/m fcb
+	add	ix, bc
 	ret
 
 
 ;Destroy a BDOS channel
 ;IN: IX=FCB
 DestroyChannel:
-	push bc
-	ld bc, -CH_FCB			;adjust to get the basic channel
-	add ix, bc
-	rst 08
-	DEFB 56
-	pop bc
+	push	bc
+	ld	bc, -CH_FCB		;adjust to get the basic channel
+	add	ix, bc
+	rst	08
+	DEFB	56
+	pop	bc
 	ret
 	
 
@@ -148,17 +148,17 @@ BDOSWriteFileBlockRandom:
 ;Generic BDOS call
 ;IX=arg, A=function
 BDOS:
-	ld (HD11), ix
-	ld (COPIES), a
-	rst 08
-	DEFB 57
+	ld	(HD11), ix
+	ld	(COPIES), a
+	rst	08
+	DEFB	57
 	ret
 
 ;Set DMA address for BDOS
 ;IX=DMA
 BDOSSetDMA:
-	ld a, 13
-	jr BDOS
+	ld	a, 13
+	jr	BDOS
 	
 ;In: IX=FCB
 BDOSSetRandFilePtr:
@@ -170,37 +170,36 @@ BDOSSetRandFilePtr:
 GetFileSize:
 	IFUSED
 	
-	ld 		a, (RWTSDrive)
-	inc		a					;Convert to BASIC drive number: 1,2	
+	ld 	a, (RWTSDrive)
+	inc	a				;Convert to BASIC drive number: 1,2	
 	call	CreateChannel	
 	
-	ld		a, 20
+	;This function always returns $FF in A, but the result is OK. But it doesn't fill R2 for big files.
+	ld	a, 20
 	call	BDOS		
-	;inc		a
-	;jr		z, GetFileSizeEnd				;This function always returns $FF in A, but the result is OK.
 		
-	ld		l, (ix + FCB_R0)
-	ld		h, (ix + FCB_R1)	
+	ld	l, (ix + FCB_R0)
+	ld	h, (ix + FCB_R1)	
 	
 	;If the file is bigger than $200 * 128 bytes records, we display 0.
-	ld		a, 1
-	cp		h
-	jr		nc, GetFileSizeOK
-	ld		hl, 0
-	jr		GetFileSizeEnd
+	ld	a, 1
+	cp	h
+	jr	nc, GetFileSizeOK
+	ld	hl, 0
+	jr	GetFileSizeEnd
 	
 GetFileSizeOK:	
 	;*128 == 2^7
-	ld		b, 7
+	ld	b, 7
 GetFileSizeMul:	
-	rl		l
-	rl		h
+	rl	l
+	rl	h
 	djnz	GetFileSizeMul
 
 GetFileSizeEnd:
 	push	hl
 		call	DestroyChannel
-	pop		hl
+	pop	hl
 
 	ret	
 	ENDIF
@@ -210,7 +209,7 @@ GetFileSizeEnd:
 DeleteFile:
 	call	CreateChannel
 	
-	ld		a, 6
+	ld	a, 6
 	call	BDOS
 	
 	call	DestroyChannel
@@ -218,52 +217,62 @@ DeleteFile:
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Returns A >= 0 if the file exists, returns $FF on error.
-;HL=file name, A=drive	
-DoesFileExist:
+;HL=file name, A=drive
+;Usefull to check the other drive, that is not indexed in cache.
+DoesFileExistOnDisk:
 	IFUSED
 	;Set temp DMA address to free RAM, to not overwrite file buffer.
 	push	af
 	push	hl
-		ld		ix, FileIdx
+		ld	ix, FileIdx
 		call 	BDOSSetDMA
-	pop		hl
-	pop		af
+	pop	hl
+	pop	af
 	
 	call	CreateChannel	
 	
 	;Uses FindFirst system call.
-	ld		a, 4
+	ld	a, 4
 	call	BDOS	
 	
 	push	af
 		call	DestroyChannel
-	pop		af
+	pop	af
 	ret
 	ENDIF
+	
+;Returns Z=1 if file name exists.	
+DoesFileExistInCache:
+	ld	hl, FileCache
+	ld	a, (FileCnt)
+	ld	c, a
+	ld	b, 0
+	call	FindCache
+	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;IN: E0 = RO, E1 = SYS, HL=filename
 ChangeFileAttrib:
-	ld 		a, (RWTSDrive)
-	inc		a					;Convert to BASIC drive number: 1,2
+	ld 	a, (RWTSDrive)
+	inc		a				;Convert to BASIC drive number: 1,2
 	push	de
 	call	CreateChannel
-	pop		de
+	pop	de
 		
-	ld		a, (ix + EXT_NAME + RO_POS)
-	sla		a								;reset existing attribute flag
-	rr		e								;put wanted flag in Carry flag
-	rr		a								;put Carry flag in register L
-	ld		(ix + EXT_NAME + RO_POS), a		;set wanted flag
+	ld	a, (ix + EXT_NAME + RO_POS)
+	sla	a							;reset existing attribute flag
+	rr	e							;put wanted flag in Carry flag
+	rr	a							;put Carry flag in register L
+	ld	(ix + EXT_NAME + RO_POS), a	;set wanted flag
 	
-	ld		a, (ix + EXT_NAME + SYS_POS)
-	sla		a
-	rr		e
-	rr		a
-	ld		(ix + EXT_NAME + SYS_POS), a
+	ld	a, (ix + EXT_NAME + SYS_POS)
+	sla	a
+	rr	e
+	rr	a
+	ld	(ix + EXT_NAME + SYS_POS), a
 	
 FileAttribSet:
-	ld		a, 17
+	ld	a, 17
 	call	BDOS
 	
 	call	DestroyChannel
@@ -274,48 +283,48 @@ FileAttribSet:
 ;HL=original name, DE = new name
 ;Works only on the same drive.
 RenameFile:
-	ld 		a, (RWTSDrive)
-	inc		a					;Convert to BASIC drive number: 1,2
+	ld 	a, (RWTSDrive)
+	inc		a				;Convert to BASIC drive number: 1,2
 	push	de
 	call	CreateChannel
-	pop		de
+	pop	de
 	
-	push	ix					;IX == FCB
-	pop		hl	
-	ld		bc, 17				;new name must be found at FCB + 16
-	add		hl, bc
-	ex		de, hl
-	ld		a, (RWTSDrive)
-	ld		(de), a
-	ld		bc, NAMELEN
+	push	ix				;IX == FCB
+	pop	hl	
+	ld		bc, 17			;new name must be found at FCB + 16
+	add	hl, bc
+	ex	de, hl
+	ld	a, (RWTSDrive)
+	ld	(de), a
+	ld	bc, NAMELEN
 	ldir
 	
-	ld		a, 10
+	ld	a, 10
 	call	BDOS
 	
 	call	DestroyChannel
 	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 PromptDiskChangeDst:
-	ld		hl, MsgInsertDstDsk
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgInsertDstDsk
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	ld		hl, MsgPressAnyKey
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgPressAnyKey
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadChar	
 	ret
 	
 PromptDiskChangeSrc:
-	ld		hl, MsgInsertSrcDsk
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgInsertSrcDsk
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	ld		hl, MsgPressAnyKey
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgPressAnyKey
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadChar	
 	ret
@@ -334,363 +343,376 @@ PromptDiskChangeSrc:
 ;4. create empty dest file, 
 ;5. write first file part, 
 ;6. enter copy loop: ask for SRC disk, read file part, ask for DST disk, write file part, check end, loop.
-CopyFile:					
-	ld 		a, (RWTSDrive)
-	inc		a					;Convert to BASIC drive number: 1,2
-	ld		(CopyFileSrcDrv), a
-	ld		(CopyFileDstDrv), a
-	ld		de, CopyFileSrcName
-	ld		bc, NAMELEN
+CopyFile:				
+	ld 	a, (RWTSDrive)
+	inc		a				;Convert to BASIC drive number: 1,2
+	ld	(CopyFileSrcDrv), a
+	ld	(CopyFileDstDrv), a
+	ld	de, CopyFileSrcName
+	ld	bc, NAMELEN
 	push	hl
 	push	bc
 	ldir	
-	pop		bc
-	pop		hl	
-	ld		de, CopyFileDstName
+	pop	bc
+	pop	hl	
+	ld	de, CopyFileDstName
 	ldir		
 	
 	;Reset R/O attribute for destination, to allow file write.
-	ld		a, (CopyFileDstName+RO_POS)
-	res		7, a
-	ld		(CopyFileDstName+RO_POS), a
+	ld	a, (CopyFileDstName+RO_POS)
+	res	7, a
+	ld	(CopyFileDstName+RO_POS), a
 	
-	xor		a
-	ld		(CopyFileRes), a	
-	ld		de, 0
-	ld		(FilePosRead), de	
-	ld		(FilePosWrite), de	
+	xor	a
+	ld	(CopyFileRes), a	
+	ld	de, 0
+	ld	(FilePosRead), de	
+	ld	(FilePosWrite), de	
 
-	ld		a, (CopyFileSrcDrv)
-	add		'A'-1
+	ld	a, (CopyFileSrcDrv)
+	add	'A'-1
 	;Update menu messages with current drive.
-	ld		(MsgMenuSingleDrv1), a
-	ld		(MsgMenuSingleDrv2), a
-	ld		(MsgMenuDualDrv1), a	
-	ld		(MsgMenuToComDrv), a
-	ld		(MsgMenuFromCOMDrv), a		
+	ld	(MsgMenuSingleDrv1), a
+	ld	(MsgMenuSingleDrv2), a
+	ld	(MsgMenuDualDrv1), a	
+	ld	(MsgMenuToComDrv), a
+	ld	(MsgMenuFromCOMDrv), a
+	ld	(MsgMenuFromTapeDrv), a
+;	ld	(MsgMenuToTapeDrv), a
 	;Update menu messages with the alternate drive.
-	ld		a, (CopyFileSrcDrv) 	
-	xor		%11	
-	add		'A'-1
-	ld		(MsgMenuDualDrv2), a
+	ld	a, (CopyFileSrcDrv) 	
+	xor	%11	
+	add	'A'-1
+	ld	(MsgMenuDualDrv2), a
 	
-	ld		hl, MsgMenuFileCopy
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgMenuFileCopy
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-	ld		hl, MsgMenuBack
-	ld		de, LST_LINE_MSG + 2 << 8
+	ld	hl, MsgMenuBack
+	ld	de, LST_LINE_MSG + 2 << 8
 	call	PrintStr	
-	ld		hl, MsgMenuSingle
-	ld		de, LST_LINE_MSG + 3 << 8
+	ld	hl, MsgMenuSingle
+	ld	de, LST_LINE_MSG + 3 << 8
 	call	PrintStr	
-	ld		hl, MsgMenuDual
-	ld		de, LST_LINE_MSG + 4 << 8
+	ld	hl, MsgMenuDual
+	ld	de, LST_LINE_MSG + 4 << 8
 	call	PrintStr	
-	ld		hl, MsgMenuToCOM
-	ld		de, LST_LINE_MSG + 5 << 8
+	ld	hl, MsgMenuToCOM
+	ld	de, LST_LINE_MSG + 5 << 8
 	call	PrintStr
-	ld		hl, MsgMenuFromCOM
-	ld		de, LST_LINE_MSG + 6 << 8
-	call	PrintStr			
+	ld	hl, MsgMenuFromCOM
+	ld	de, LST_LINE_MSG + 6 << 8
+	call	PrintStr
+	ld	hl, MsgMenuFromTape
+	ld	de, LST_LINE_MSG + 7 << 8
+	call	PrintStr
+;	ld	hl, MsgMenuToTape
+;	ld	de, LST_LINE_MSG + 8 << 8
+;	call	PrintStr
 
 	call	ReadChar
-	ld		(CopySelOption), a
+	ld	(CopySelOption), a
 	
 	push	af
-		ld		b, 6
+		ld	b, 8
 		call	ClearNMsgLines
-	pop		af
+	pop	af
 		
-	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file				
-	cp		'0'
-	jr		nz, CopyFileNotExit
-	pop		hl	
-	jp		ReadKeyLoop
+	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file			
+	cp	'0'
+	jr	nz, CopyFileNotExit
+	pop	hl	
+	jp	ReadKeyLoop
 	
 CopyFileNotExit:	
-	cp		'1'
-	jr		z, CopyFileSameDrive
+	cp	'1'
+	jr	z, CopyFileSameDrive
 	
-	cp		'2'
-	jp		z, CopyFileDualDrive
+	cp	'2'
+	jp	z, CopyFileDualDrive
 	
-	cp		'3'
-	jp		z, CopyFileToCOM
+	cp	'3'
+	jp	z, CopyFileToCOM
 	
-	cp		'4'
-	jp		z, CopyFileFromCOM
+	cp	'4'
+	jp	z, CopyFileFromCOM
 	
-	pop		hl
-	jp		ReadKeyLoop
-				
+	cp	'5'
+	jp	z, CopyFileFromTape
+	
+	cp	'6'
+	jp	z, CopyFileToTape
+	
+	pop	hl
+	jp	ReadKeyLoop
 			
-;OUT: Z=1 => file doesn't exist or overwrite was confirmed if it does exist.			
+			
+;OUT: Z=1 => file doesn't exist or overwrite was confirmed if it does exist.		
 CopyFileCheckOverwrite:	
 	;Check if destination file exists.
-	ld		a, (CopyFileDstDrv)
-	ld		hl, CopyFileDstName
-	call	DoesFileExist
-	inc		a	
-	ret		z						;return Z=1 when file doesn't exist
+	ld	a, (CopyFileDstDrv)
+	ld	hl, CopyFileDstName
+	call	DoesFileExistOnDisk
+	ret	z					;return Z=1 when file exist
 	
 	;Ask overwrite confirmation.
-	ld		hl, MsgFileOverwrite
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgFileOverwrite
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	call	ReadChar	
-	cp		'y'
-	ret								;return Z=1 when user confirmed file overwrite
+	cp	'y'
+	ret							;return Z=1 when user confirmed file overwrite
 	
 
 CopyFileCreateNewFile:		
-	ld		a, (CopyFileDstDrv)
-	ld		hl, CopyFileDstName
+	ld	a, (CopyFileDstDrv)
+	ld	hl, CopyFileDstName
 	push	af
 	push	hl
-		call	DeleteFile			;Delete destination file if it exists, like the CP/M guide recommends.
-	pop		hl
-	pop		af
+		call	DeleteFile		;Delete destination file if it exists, like the CP/M guide recommends.
+	pop	hl
+	pop	af
 	call	CreateChannel
 	call 	BDOSCreateFile		
-	inc  	a						;Cancel if A==$FF
-	ret		z
+	inc  	a					;Cancel if A==$FF
+	ret	z
 	
 	;Close dest file once created.
 	push	af
 		call	BDOSCloseFile
 		call	DestroyChannel	
-	pop		af
+	pop	af
 	ret	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 CopyFileSameDrive:	
 	;Read first file section from SRC.
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileSrcName
-	ld		b, MAX_SECT_BUF
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileSrcName
+	ld	b, MAX_SECT_BUF
 	call	ReadFileSection	
-	ld		a, (CopyFileSectCnt)
-	or		a
-	ret		z
+	ld	a, (CopyFileSectCnt)
+	or	a
+	ret	z
 
 	;Prompt for DST disk change.
 	call	PromptDiskChangeDst
-	ld		a, (RWTSDrive)		
+	ld	a, (RWTSDrive)		
 	call	BDOSInit
 	
-	ld		b, 2
+	ld	b, 2
 	call	ClearNMsgLines
 	
 	call	CopyFileCheckOverwrite
-	ret		nz							
+	ret	nz						
 	
 	call	CopyFileCreateNewFile
-	ret		z		
+	ret	z		
 	
-CopyFileSameDriveLoop:				
-	ld		a, (CopyFileSectCnt)
-	ld		l, a
-	ld		h, 0
-	ld		de, MsgCopySectors
+CopyFileSameDriveLoop:			
+	ld	a, (CopyFileSectCnt)
+	ld	l, a
+	ld	h, 0
+	ld	de, MsgCopySectors
 	call	Byte2Txt
-	ld		hl, MsgCopySectors
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgCopySectors
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 
-	ld		a, (CopyFileRes)			;Save read status code.
+	ld	a, (CopyFileRes)		;Save read status code.
 	push	af
-		ld		a, (CopyFileDstDrv)
-		ld		hl, CopyFileDstName		
-		call	WriteFileSection					
-		ld		a, (CopyFileRes)
-		ld		l, a
-	pop		af
-	or		l
-	ret		nz							;Exit if read or write had error. Error 1 on read means EOF (some data might still be read).
+		ld	a, (CopyFileDstDrv)
+		ld	hl, CopyFileDstName		
+		call	WriteFileSection				
+		ld	a, (CopyFileRes)
+		ld	l, a
+	pop	af
+	or	l
+	ret	nz						;Exit if read or write had error. Error 1 on read means EOF (some data might still be read).
 	
-				
+			
 	;Prompt for SRC disk change.
 	call	PromptDiskChangeSrc
-	ld		a, (RWTSDrive)		
+	ld	a, (RWTSDrive)		
 	call	BDOSInit
 	
-	ld		b, 2
+	ld	b, 2
 	call	ClearNMsgLines
 
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileSrcName
-	ld		b, MAX_SECT_BUF
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileSrcName
+	ld	b, MAX_SECT_BUF
 	call	ReadFileSection	
-	ld		a, (CopyFileSectCnt)
-	or		a
-	ret		z
+	ld	a, (CopyFileSectCnt)
+	or	a
+	ret	z
 	
 	;Prompt for DST disk change.
 	call	PromptDiskChangeDst
-	ld		a, (RWTSDrive)		
+	ld	a, (RWTSDrive)		
 	call	BDOSInit
 	
-	ld		b, 2
+	ld	b, 2
 	call	ClearNMsgLines
 	
-	jr		CopyFileSameDriveLoop
+	jr	CopyFileSameDriveLoop
 		
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 		
 CopyFileDualDrive:	
-	ld		a, (CopyFileSrcDrv) 	
-	xor		%11	
-	ld		(CopyFileDstDrv), a	
+	ld	a, (CopyFileSrcDrv) 	
+	xor	%11	
+	ld	(CopyFileDstDrv), a	
 	
 	call	CopyFileCheckOverwrite
-	ret		nz
+	ret	nz
 	
 	call	CopyFileCreateNewFile
-	ret		z
+	ret	z
 	
-CopyFileDualDriveLoop:			
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileSrcName
-	ld		b, MAX_SECT_BUF
+CopyFileDualDriveLoop:		
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileSrcName
+	ld	b, MAX_SECT_BUF
 	call	ReadFileSection	
-	ld		a, (CopyFileSectCnt)
-	or		a
-	ret		z	
+	ld	a, (CopyFileSectCnt)
+	or	a
+	ret	z	
 	
-	ld		a, (CopyFileSectCnt)
-	ld		l, a
-	ld		h, 0
-	ld		de, MsgCopySectors
+	ld	a, (CopyFileSectCnt)
+	ld	l, a
+	ld	h, 0
+	ld	de, MsgCopySectors
 	call	Byte2Txt
-	ld		hl, MsgCopySectors
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgCopySectors
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 		
-	ld		a, (CopyFileRes)
+	ld	a, (CopyFileRes)
 	push	af
-		ld		a, (CopyFileDstDrv)
-		ld		hl, CopyFileDstName
-		call	WriteFileSection				
-		ld		a, (CopyFileRes)	
-		ld		l, a
-	pop		af
-	or		l
-	ret		nz
+		ld	a, (CopyFileDstDrv)
+		ld	hl, CopyFileDstName
+		call	WriteFileSection			
+		ld	a, (CopyFileRes)	
+		ld	l, a
+	pop	af
+	or	l
+	ret	nz
 			
-	jr		CopyFileDualDriveLoop	
+	jr	CopyFileDualDriveLoop	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 CopyFileToCOM:
-	xor		a
-	ld		(CopyFileRes), a
-	ld		(CopyFileSectCnt), a
-	ld		de, 0
-	ld		(FilePosRead), de
+	xor	a
+	ld	(CopyFileRes), a
+	ld	(CopyFileSectCnt), a
+	ld	de, 0
+	ld	(FilePosRead), de
 	
 CopyFileToCOMLoop:		
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileSrcName
-	ld		b, MAX_SECT_BUF
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileSrcName
+	ld	b, MAX_SECT_BUF
 	call	ReadFileSection	
 		
-	ld		a, (CopyFileSectCnt)
-	or		a
-	jr		z, CopyFileToCOMEnd
+	ld	a, (CopyFileSectCnt)
+	or	a
+	jr	z, CopyFileToCOMEnd
 	
 	;Send buffer to COM port.
-	ld		hl, FileData
-	ld		b, a					;Sector size is 256.
-	ld		c, 0
+	ld	hl, FileData
+	ld		b, a				;Sector size is 256.
+	ld	c, 0
 	call	SERTB		
 	
-	ld		a, (CopyFileRes)
-	or		a
-	jr		z, CopyFileToCOMLoop
+	ld	a, (CopyFileRes)
+	or	a
+	jr	z, CopyFileToCOMLoop
 	
 CopyFileToCOMEnd:	
 	;Reset read error code, as 1 is returned when file is finished reading.
-	xor		a
-	ld		(CopyFileRes), a	
+	xor	a
+	ld	(CopyFileRes), a	
 	
 	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 CopyFileFromCOM:
-	xor		a
-	ld		(CopyFileRes), a	
-	ld		de, 0
-	ld		(FilePosWrite), de
+	xor	a
+	ld	(CopyFileRes), a	
+	ld	de, 0
+	ld	(FilePosWrite), de
 	
 	;Must ask for the new file name and check to not exist.	
-	ld		hl, MsgNewFileName
-	ld		de, LST_LINE_MSG + 1 << 8
-	ld		a, SCR_DEF_CLR | CLR_FLASH
+	ld	hl, MsgNewFileName
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
-	ld		hl, MsgClear
-	ld		de, FileData
-	ld		bc, NAMELEN
+	ld	hl, MsgClear
+	ld	de, FileData
+	ld	bc, NAMELEN
 	ldir
-	ld		a, $80 | ' '
-	ld		(de), a
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		hl, FileData
+	ld	a, $80 | ' '
+	ld	(de), a
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	hl, FileData
 	call	PrintStr
 	
-	ld		de, LST_LINE_MSG + 2 << 8
-	ld		bc, NAMELEN
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	bc, NAMELEN
 	call	ReadString
 	
-	ld		de, FileData
-	ld		a, (de)
-	cp		' '					;If starting with space, input was canceled.
-	ret		z
+	ld	de, FileData
+	ld	a, (de)
+	cp	' '				;If starting with space, input was canceled.
+	ret	z
 	
 	;Copy new file name
-	ld		hl, FileData
-	ld		de, CopyFileDstName
-	ld		bc, NAMELEN
+	ld	hl, FileData
+	ld	de, CopyFileDstName
+	ld	bc, NAMELEN
 	ldir
 	
 	;Check if new name doesn't exist already.
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileDstName
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileDstName
 	call	CopyFileCheckOverwrite
-	ret		nz	
+	ret	nz	
 		
 	;Delete and re-create empty destination file		
-	ld		a, (CopyFileSrcDrv)
-	ld		hl, CopyFileDstName
+	ld	a, (CopyFileSrcDrv)
+	ld	hl, CopyFileDstName
 	call	CopyFileCreateNewFile
-	ret		z
+	ret	z
 	
 CopyFileFromCOMLoop:		
-	ld		hl, FileData
-	ld		bc, FileDataSize
-	ld		e, 1				;Exit on timeout, don't get stuck waiting for more data from PC.
-	call	SERRB				;BC = Number of bytes read from COM
-	ld		a, c
-	or		b
-	ret		z
+	ld	hl, FileData
+	ld	bc, FileDataSize
+	ld	e, 1			;Exit on timeout, don't get stuck waiting for more data from PC.
+	call	SERRB			;BC = Number of bytes read from COM
+	ld	a, c
+	or	b
+	ret	z
 
 	;If C is not 0, add one more sector.
-	ld 		a, c
-	or		a
-	jr		z, CopyFileFromCOMDontInc
-	inc		b
+	ld 	a, c
+	or	a
+	jr	z, CopyFileFromCOMDontInc
+	inc	b
 CopyFileFromCOMDontInc:	
-	ld		a, b				;Sector size is 256			
-	ld		(CopyFileSectCnt), a
-	ld		a, (CopyFileDstDrv)
-	ld		hl, CopyFileDstName	
+	ld	a, b				;Sector size is 256		
+	ld	(CopyFileSectCnt), a
+	ld	a, (CopyFileDstDrv)
+	ld	hl, CopyFileDstName	
 	call	WriteFileSection	
 	
-	ld		a, (CopyFileRes)
-	or		a
-	jr		z, CopyFileFromCOMLoop
+	ld	a, (CopyFileRes)
+	or	a
+	jr	z, CopyFileFromCOMLoop
 	
 	ret
 
@@ -705,101 +727,287 @@ CopyFileFromCOMDontInc:
 ;Must use sequential read/write. But for the first operation must use random read/write.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ReadFileSection:
-	ld		de, BDOSReadFileBlockRandom
-	ld		(CopyFileOperAddr1), de
-	ld		de, BDOSReadFileBlockSeq
-	ld		(CopyFileOperAddr2), de
-	ld		de, FilePosRead
-	ld		(CopyFilePtr), de
-	ld		(CopyFilePtr2), de	
+	ld	de, BDOSReadFileBlockRandom
+	ld	(CopyFileOperAddr1), de
+	ld	de, BDOSReadFileBlockSeq
+	ld	(CopyFileOperAddr2), de
+	ld	de, FilePosRead
+	ld	(CopyFilePtr), de
+	ld	(CopyFilePtr2), de	
 	
 	;Limit max sectors to read to leave space for the index too.
 	push	af		
-		ld		a, b
-		ld		(CopyFileSectCnt), a		
-	pop		af
-	jr		ReadWriteFileSection
+		ld	a, b
+		ld	(CopyFileSectCnt), a		
+	pop	af
+	jr	ReadWriteFileSection
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 WriteFileSection:
-	ld		de, BDOSWriteFileBlockRandom
-	ld		(CopyFileOperAddr1), de
-	ld		de, BDOSWriteFileBlockSeq
-	ld		(CopyFileOperAddr2), de
-	ld		de, FilePosWrite
-	ld		(CopyFilePtr), de
-	ld		(CopyFilePtr2), de		
+	ld	de, BDOSWriteFileBlockRandom
+	ld	(CopyFileOperAddr1), de
+	ld	de, BDOSWriteFileBlockSeq
+	ld	(CopyFileOperAddr2), de
+	ld	de, FilePosWrite
+	ld	(CopyFilePtr), de
+	ld	(CopyFilePtr2), de		
 	
 
 ;Common routine for both read and write operations. Code is patched to execute either read or write.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
-ReadWriteFileSection:			
+ReadWriteFileSection:		
 	call	CreateChannel	
 	ld	(CopyFileFCB), ix	
 	call 	BDOSOpenFile		
-	inc  	a						;Cancel if A==$FF
-	ret	z			
+	inc  	a					;Cancel if A==$FF
+	ret	z		
 	
 	;Set DMA initial pointer = FileData
 	push	ix
-		ld		hl, FileData
-		ld		ix, CopyFileDMAAddr	
-		ld		(ix), l
-		ld		(ix+1), h
-		ld		ix, FileData
+		ld	hl, FileData
+		ld	ix, CopyFileDMAAddr	
+		ld	(ix), l
+		ld	(ix+1), h
+		ld	ix, FileData
 		call 	BDOSSetDMA
-	pop		ix
+	pop	ix
 	
 CopyFilePtr EQU $+2
 	;Update file pointer using read/write random call.
-	ld		de, (FilePosRead)		
-	ld		(ix + FCB_R0), e
-	ld		(ix + FCB_R1), d		
+	ld	de, (FilePosRead)		
+	ld	(ix + FCB_R0), e
+	ld	(ix + FCB_R1), d		
 CopyFileOperAddr1 EQU $ + 1	
 	call 	BDOSReadFileBlockRandom
 	
-	ld		(CopyFileRes), a		
-	or		a
-	jr		nz, ReadWriteFileSectionEnd
+	ld	(CopyFileRes), a		
+	or	a
+	jr	nz, ReadWriteFileSectionEnd
 	
-	ld		a, (CopyFileSectCnt)	
-	ld		b, a		
+	ld	a, (CopyFileSectCnt)	
+	ld	b, a		
 	
-ReadWriteFileSectionLoop:			
+ReadWriteFileSectionLoop:		
 	push	bc
-		ld		ix, (CopyFileDMAAddr)		
+		ld	ix, (CopyFileDMAAddr)		
 		call 	BDOSSetDMA		
-		inc		ixh
-		ld		(CopyFileDMAAddr), ix		
+		inc	ixh
+		ld	(CopyFileDMAAddr), ix		
 		
-		ld		ix, (CopyFileFCB)				
+		ld	ix, (CopyFileFCB)			
 CopyFileOperAddr2 EQU $ + 1
-		call 	BDOSReadFileBlockSeq				
-		ld		(CopyFileRes), a				
-	pop		bc	
-	or		a		
-	jr		nz, ReadWriteFileSectionEnd	;Exit on read/write error.
-	djnz	ReadWriteFileSectionLoop		;Exit on buffer full.
+		call 	BDOSReadFileBlockSeq			
+		ld	(CopyFileRes), a			
+	pop	bc	
+	or	a		
+	jr	nz, ReadWriteFileSectionEnd	;Exit on read/write error.
+	djnz	ReadWriteFileSectionLoop	;Exit on buffer full.
 			
 ReadWriteFileSectionEnd:
 	;Update sector count variable with how many sectors were transfered.
-	ld		a, (CopyFileSectCnt)
-	sub		b				;Substract the number of sectors left to read when EOF was encountered or buffer ended.			
-	ld		(CopyFileSectCnt), a		;Store the number of sectors actualy read.
+	ld	a, (CopyFileSectCnt)
+	sub	b				;Substract the number of sectors left to read when EOF was encountered or buffer ended.		
+	ld	(CopyFileSectCnt), a	;Store the number of sectors actualy read.
 
 	;Update random access file pointer with the last read value, before file ended or before RAM buffer ended.		
 	call	BDOSSetRandFilePtr
-	ld		e, (ix + FCB_R0)
-	ld		d, (ix + FCB_R1)	
+	ld	e, (ix + FCB_R0)
+	ld	d, (ix + FCB_R1)	
 CopyFilePtr2 EQU $+2		
-	ld		(FilePosRead), de		
+	ld	(FilePosRead), de		
 	
-	call 	BDOSCloseFile				
+	call 	BDOSCloseFile			
 	call 	DestroyChannel
 		
-	ld		de, (CopyFileDMAAddr)
-	;dec		d
+	ld	de, (CopyFileDMAAddr)
 	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+CopyFileFromTape:
+	ld	hl, MsgMenuFromTape+3
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	
+	ld	ix, FileData
+	ld	de, TAPE_HDR_LEN
+	xor	a
+	scf
+	call	TAPE_LDR
+	jp	nc, CopyFileFromTapeErrorLoading
+	
+	call	DisplayTapeBlockInfo
+	
+	;Check if file name exist already, after adjusting from 10 to 11 chars.
+	ld	hl, FileData + TAPE_HDR_NAME
+	ld	de, FileData + TAPE_HDR_LEN
+	push	de
+	ld	bc, TAPE_HDR_NAME_LEN
+	ldir
+	ld	a, ' '
+	ld	(de), a
+	pop	de
+	
+	call	DoesFileExistInCache
+	ld	hl, MsgFileExists
+	jp	z, CopyFileFromTapeError
+		
+	;If tape block is too big to fit in the free RAM or on disk, exit with error.
+	ld	hl, MAX_RAM_FREE
+	ld	bc, (FileData+TAPE_HDR_BLOCK_LEN)
+	or	a
+	sbc	hl, bc
+	ld	hl, MsgErrFileTooBig
+	jr	c, CopyFileFromTapeError
+	
+	;Check free disk space.
+	ld	hl, (AUCntMaxFree)
+	ld	de, (AUCntUsed)		
+	or	a
+	sbc	hl, de
+	rl	l							;*2, 2K/AU
+	rl	h
+	ld	de, (FileData+TAPE_HDR_BLOCK_LEN)
+	;Transform tape block len in KB: /256/4.
+	rr	d
+	rr	e
+	rr	d
+	rr	e
+	ld	a, e
+	ld	e, d
+	ld	d, 0
+	or	a
+	jr	z, CopyFileFromTapeExactKB
+	inc	e
+CopyFileFromTapeExactKB:	
+	sbc	hl, de
+	ld	hl, MsgErrFileTooBig
+	jr	c, CopyFileFromTapeError
+
+	ld	ix, FileData + TAPE_HDR_LEN + HDR_SZ
+	ld	de, (FileData+TAPE_HDR_BLOCK_LEN)
+	ld	a, $ff
+	scf
+	call	TAPE_LDR
+	jr	nc, CopyFileFromTapeErrorLoading
+	
+	;Convert tape header to disk header and save file.
+	ld	a, (FileData + TAPE_HDR_TYPE)
+	ld	(FileData + TAPE_HDR_LEN + HDR_TYPE), a
+	
+	;Add header lenght to tape block length.
+	ld	hl, (FileData + TAPE_HDR_BLOCK_LEN)
+	ld	(FileData + TAPE_HDR_LEN + HDR_LEN), hl
+	
+	ld	hl, (FileData + TAPE_HDR_BLOCK_START)
+	ld	(FileData + TAPE_HDR_LEN + HDR_ADDR), hl
+	
+	ld	hl, (FileData + TAPE_HDR_VARS)
+	ld	(FileData + TAPE_HDR_LEN + HDR_PLEN), hl
+	
+	ld	hl, (FileData + TAPE_HDR_BLOCK_START)
+	ld	(FileData + TAPE_HDR_LEN + HDR_LINE), hl	
+	
+	;Calculate sector count, considering header length.
+	ld	hl, (FileData + TAPE_HDR_LEN + HDR_LEN)
+	ld	bc, HDR_SZ
+	add	hl, bc
+	ld	a, l
+	ld	b, h
+	or	a
+	jr	z, CopyFileFromTapeExactKB2
+	inc	b
+CopyFileFromTapeExactKB2:	
+
+	;Adjust name from 10 to 11 chars.
+	ld	hl, FileData + TAPE_HDR_NAME + TAPE_HDR_NAME_LEN
+	ld	(hl), ' '
+	ld	hl, FileData + TAPE_HDR_NAME
+	
+	ld	de, FileData + TAPE_HDR_LEN	
+	call	IF1FileSave
+		
+	ret
+	
+	
+CopyFileFromTapeErrorLoading:
+	ld	hl, MsgTapeLoadErr
+CopyFileFromTapeError:	
+	ld	de, LST_LINE_MSG + 6 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+	call	ReadChar
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+CopyFileToTape:
+/*
+	ld	hl, MsgMenuToTape+2
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_DEF_CLR | CLR_FLASH
+	call	PrintStrClr
+*/
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+DisplayTapeBlockInfo:
+	ld	hl, FileData+TAPE_HDR_NAME
+	ld	de, MsgFileNameN
+	ld	bc, TAPE_HDR_NAME_LEN	
+	ldir
+	dec	de
+	ld	a, (de)
+	or	$80
+	ld	(de), a
+	ld	hl, MsgFileName
+	ld	de, LST_LINE_MSG + 2 << 8
+	call	PrintStr
+
+	ld	a, (FileData+TAPE_HDR_TYPE)
+	cp	PROG_TYPE
+	ld	hl, MsgFileTypePrg
+	jr	z, DisplayTapeBlockType
+	
+	cp	BYTE_TYPE
+	ld	hl, MsgFileTypeByte
+	jr	z, DisplayTapeBlockType
+	
+	cp	CHAR_TYPE
+	ld	hl, MsgFileTypeChrA
+	jr	z, DisplayTapeBlockType
+	
+	cp	NUMB_TYPE
+	ld	hl, MsgFileTypeNoA
+
+DisplayTapeBlockType:
+	;Print type, name, start, length.
+	ld	de, MsgFileTypeN
+	ld	bc, 7
+	ldir
+	
+	ld	hl, MsgFileType
+	ld	de, LST_LINE_MSG + 3 << 8
+	call	PrintStr	
+	
+	ld	hl, (FileData+TAPE_HDR_BLOCK_START)
+	ld	de, MsgFileStartN
+	call	Word2Txt
+	ld	hl, MsgFileStart
+	ld	de, LST_LINE_MSG + 4 << 8
+	call	PrintStr
+	
+	ld	hl, (FileData+TAPE_HDR_BLOCK_LEN)
+	ld	de, MsgFileLenN
+	call	Word2Txt
+	ld	hl, MsgFileLen
+	ld	de, LST_LINE_MSG + 5 << 8
+	call	PrintStr	
+	
+	ret
+	
 
 	ENDIF
