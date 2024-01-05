@@ -1636,8 +1636,9 @@ TrackBuf		EQU	DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU	DataBuf
 ;4K index allows for 2000 lines of text.
-FileIdxSize		EQU	2 * 1024
-FileIdxBlocksSize	EQU	1024/2
+FileIdxSize		EQU	3 * 1024
+;The number of 2-byte offsets of each block loaded in RAM.
+FileIdxBlocksSize	EQU	50
 ;File buffer size, without index
 FileDataSize		EQU	(MAX_SECT_RAM * SECT_SZ) - FileIdxSize - FileIdxBlocksSize
 ;Set a few KB aside for file indexing
