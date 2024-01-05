@@ -106,7 +106,7 @@ ErrorHandler:
 	pop	hl
 	ld	(ERRSP), hl
 
-	ld		a, (ERRNR)	;Display the error message
+	ld	a, (ERRNR)
 	ld	l, a
 	ld	h, 0
 	ld	de, MsgErrCode
@@ -115,8 +115,11 @@ ErrorHandler:
 	ld	de, LST_LINE_MSG + 1 << 8
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-
+	
+	;Display the error message, if > 26, since those < 26 are specific to the regular ROM.
 	ld	a, (ERRNR)
+	cp	26+1
+	jr	c, ErrorHandlerEnd
 	call	GetErrMsg
 
 	ld	hl, DataBuf
@@ -124,8 +127,9 @@ ErrorHandler:
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 
+ErrorHandlerEnd:
 	call	ReadChar
-	call	BDOSInit
+	;call	BDOSInit
 	jp	Start
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -373,12 +377,15 @@ CheckKeyCopy:
 	jp	ReadKeyLoop
 	
 CopyFileOK:		
-	ld	b, 2
+	ld	b, 6
 	call	ClearNMsgLines
-	;Display destination disk after file copy, if on disk copy, to to COM (1, 2, 4).
+	;Display destination disk after file copy, if on disk copy, (1, 2, 4, 5). Don't reload disk if on option 3, 6.
 	ld	a, (CopySelOption)
 	cp	'3'
 	jp	z, ReadKeyLoop
+	cp	'6'
+	jp	z, ReadKeyLoop
+	
 	ld	a, (CopyFileDstDrv)	
 	dec	a
 	ld	(RWTSDrive), a
@@ -957,7 +964,9 @@ HandleFileCODE:
 	pop	bc					;2nd, 3rd call for error handler
 	pop	bc
 	ld	(ERRSP), bc
-	push	de					;push CODE address to return to = start of CODE block
+	ld	bc, $12A2		;Jump to ROM main loop
+	push	bc
+	push	de					;push CODE address to return to = start of CODE block	
 	jp	PRN_BUF
 
 
@@ -1552,8 +1561,8 @@ MsgMenuFromCOMDrv	DEFM	'A', ':' | $80
 MsgMenuFromTape		DEFM	'5. Copy Tape->'
 MsgMenuFromTapeDrv	DEFM	'A', ':' | $80
 
-;MsgMenuToTape		DEFM	'6. Copy '
-;MsgMenuToTapeDrv	DEFM	'A:->Tap', 'e' | $80
+MsgMenuToTape		DEFM	'6. Copy '
+MsgMenuToTapeDrv	DEFM	'A:->Tap', 'e' | $80
 
 MsgMenuFmt1	DEFM	'5. Format A', ':' | $80
 MsgMenuFmt2	DEFM	'6. Format B', ':' | $80
@@ -1627,8 +1636,8 @@ TrackBuf		EQU	DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU	DataBuf
 ;4K index allows for 2000 lines of text.
-FileIdxSize		EQU	4 * 1024
-FileIdxBlocksSize	EQU	1 * 1024
+FileIdxSize		EQU	2 * 1024
+FileIdxBlocksSize	EQU	1024/2
 ;File buffer size, without index
 FileDataSize		EQU	(MAX_SECT_RAM * SECT_SZ) - FileIdxSize - FileIdxBlocksSize
 ;Set a few KB aside for file indexing

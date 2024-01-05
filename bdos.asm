@@ -378,7 +378,7 @@ CopyFile:
 	ld	(MsgMenuToComDrv), a
 	ld	(MsgMenuFromCOMDrv), a
 	ld	(MsgMenuFromTapeDrv), a
-;	ld	(MsgMenuToTapeDrv), a
+	ld	(MsgMenuToTapeDrv), a
 	;Update menu messages with the alternate drive.
 	ld	a, (CopyFileSrcDrv) 	
 	xor	%11	
@@ -407,9 +407,9 @@ CopyFile:
 	ld	hl, MsgMenuFromTape
 	ld	de, LST_LINE_MSG + 7 << 8
 	call	PrintStr
-;	ld	hl, MsgMenuToTape
-;	ld	de, LST_LINE_MSG + 8 << 8
-;	call	PrintStr
+	ld	hl, MsgMenuToTape
+	ld	de, LST_LINE_MSG + 8 << 8
+	call	PrintStr
 
 	call	ReadChar
 	ld	(CopySelOption), a
@@ -831,13 +831,15 @@ CopyFileFromTape:
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
+	;Load header.
 	ld	ix, FileData
 	ld	de, TAPE_HDR_LEN
-	xor	a
+	ld	a, TAPE_BLOCK_ID_HDR
 	scf
-	call	TAPE_LDR
+	call	TAPE_LOAD
 	jp	nc, CopyFileFromTapeErrorLoading
 	
+	;Display block info from header.
 	call	DisplayTapeBlockInfo
 	
 	;Check if file name exist already, after adjusting from 10 to 11 chars.
@@ -848,8 +850,7 @@ CopyFileFromTape:
 	ldir
 	ld	a, ' '
 	ld	(de), a
-	pop	de
-	
+	pop	de	
 	call	DoesFileExistInCache
 	ld	hl, MsgFileExists
 	jp	z, CopyFileFromTapeError
@@ -888,16 +889,15 @@ CopyFileFromTapeExactKB:
 
 	ld	ix, FileData + TAPE_HDR_LEN + HDR_SZ
 	ld	de, (FileData+TAPE_HDR_BLOCK_LEN)
-	ld	a, $ff
+	ld	a, TAPE_BLOCK_ID_BLK
 	scf
-	call	TAPE_LDR
+	call	TAPE_LOAD
 	jr	nc, CopyFileFromTapeErrorLoading
 	
 	;Convert tape header to disk header and save file.
 	ld	a, (FileData + TAPE_HDR_TYPE)
 	ld	(FileData + TAPE_HDR_LEN + HDR_TYPE), a
-	
-	;Add header lenght to tape block length.
+		
 	ld	hl, (FileData + TAPE_HDR_BLOCK_LEN)
 	ld	(FileData + TAPE_HDR_LEN + HDR_LEN), hl
 	
@@ -944,12 +944,86 @@ CopyFileFromTapeError:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 CopyFileToTape:
-/*
-	ld	hl, MsgMenuToTape+2
+	ld	hl, MsgMenuToTape+3
 	ld	de, LST_LINE_MSG + 1 << 8
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
-*/
+	
+	;Read header for file size.
+	ld	ix, (SelFileCache)
+	ld	a, (ix + CACHE_FLAG)
+	or	a
+	call	z, ReadFileHeader
+	
+	;Don't accept untyped files.
+	ld	a, (ix + CACHE_HDR + HDR_TYPE)
+	cp	TEXT_TYPE
+	ret	nc
+	
+	;Check if file fits in available RAM.
+	ld	c, (ix + CACHE_HDR + HDR_LEN)
+	ld	b, (ix + CACHE_HDR + HDR_LEN + 1)
+	ld	hl, FileDataSize - TAPE_HDR_LEN	;Must have enough RAM for file data + tape block header
+	or	a
+	sbc	hl, bc
+	ld	hl, MsgErrFileTooBig
+	jr	c, CopyFileFromTapeError
+	
+	;Convert file header to tape header, store in FileData.
+	ld	a, (ix + CACHE_HDR + HDR_TYPE)
+	ld	(FileData + TAPE_HDR_TYPE), a	
+	
+	;Copy file name, trunc to 10 chars.
+	push	ix
+	pop	hl
+	ld	de, FileData + TAPE_HDR_NAME
+	ld	bc, TAPE_HDR_NAME_LEN
+	ldir
+	
+	;Block length
+	ld	l, (ix + CACHE_HDR + HDR_LEN)
+	ld	h, (ix + CACHE_HDR + HDR_LEN + 1)		
+	ld	(FileData + TAPE_HDR_BLOCK_LEN), hl	
+	
+	;Code block start or program start	
+	ld	a, (ix + CACHE_HDR + HDR_TYPE)
+	cp	PROG_TYPE
+	jr	z, CopyFileToTapeProg	
+	
+	ld	l, (ix + CACHE_HDR + HDR_ADDR)
+	ld	h, (ix + CACHE_HDR + HDR_ADDR + 1)
+	jr	CopyFileToTapeSaveStart
+
+CopyFileToTapeProg:	
+	ld	l, (ix + CACHE_HDR + HDR_LINE)
+	ld	h, (ix + CACHE_HDR + HDR_LINE + 1)
+	
+CopyFileToTapeSaveStart:	
+	ld	(FileData + TAPE_HDR_BLOCK_START), hl
+	
+	;Program length/variables offset.
+	ld	l, (ix + CACHE_HDR + HDR_PLEN)
+	ld	h, (ix + CACHE_HDR + HDR_PLEN + 1)
+	ld	(FileData + TAPE_HDR_VARS), hl
+				
+	;Read file in RAM.
+	push	ix				;HL=file name
+	pop	hl
+	ld	de, FileData + TAPE_HDR_LEN
+	call	IF1FileLoad	
+	
+	;Save header.
+	ld	a, TAPE_BLOCK_ID_HDR
+	ld	ix, FileData
+	ld	de, TAPE_HDR_LEN
+	call	TAPE_SAVE	
+	
+	;Save main block to tape.
+	ld	a, TAPE_BLOCK_ID_BLK
+	ld	ix, FileData + TAPE_HDR_LEN
+	ld	de, (FileData + TAPE_HDR_BLOCK_LEN)	
+	call	TAPE_SAVE
+	
 	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
