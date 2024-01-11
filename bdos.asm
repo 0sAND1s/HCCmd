@@ -826,25 +826,30 @@ CopyFilePtr2 EQU $+2
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 CopyFileFromTape:
-	ld	hl, MsgMenuFromTape+3
+	ld	hl, MsgMenuFromTape
 	ld	de, LST_LINE_MSG + 1 << 8
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
-	;Load header.
-	ld	ix, FileData
+CopyFileFromTapeLoadHeader:	
+	;Load tape header in printer buffer.
+	ld	ix, TAPE_COPY_WORK_BUF
 	ld	de, TAPE_HDR_LEN
 	ld	a, TAPE_BLOCK_ID_HDR
 	scf
+	inc	d
+	ex	af, af'
+	dec	d
+	di
 	call	TAPE_LOAD
-	jp	nc, CopyFileFromTapeErrorLoading
+	jr	nc, CopyFileFromTapeLoadHeader
 	
 	;Display block info from header.
 	call	DisplayTapeBlockInfo
 	
 	;Check if file name exist already, after adjusting from 10 to 11 chars.
-	ld	hl, FileData + TAPE_HDR_NAME
-	ld	de, FileData + TAPE_HDR_LEN
+	ld	hl, TAPE_COPY_WORK_BUF + TAPE_HDR_NAME
+	ld	de, TAPE_COPY_WORK_BUF + TAPE_HDR_LEN
 	push	de
 	ld	bc, TAPE_HDR_NAME_LEN
 	ldir
@@ -856,12 +861,12 @@ CopyFileFromTape:
 	jp	z, CopyFileFromTapeError
 		
 	;If tape block is too big to fit in the free RAM or on disk, exit with error.
-	ld	hl, MAX_RAM_FREE
-	ld	bc, (FileData+TAPE_HDR_BLOCK_LEN)
+	ld	hl, TAPE_COPY_MAX_RAM
+	ld	bc, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)
 	or	a
 	sbc	hl, bc
 	ld	hl, MsgErrFileTooBig
-	jr	c, CopyFileFromTapeError
+	jp	c, CopyFileFromTapeError
 	
 	;Check free disk space.
 	ld	hl, (AUCntMaxFree)
@@ -870,7 +875,7 @@ CopyFileFromTape:
 	sbc	hl, de
 	rl	l							;*2, 2K/AU
 	rl	h
-	ld	de, (FileData+TAPE_HDR_BLOCK_LEN)
+	ld	de, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)
 	;Transform tape block len in KB: /256/4.
 	rr	d
 	rr	e
@@ -885,33 +890,60 @@ CopyFileFromTape:
 CopyFileFromTapeExactKB:	
 	sbc	hl, de
 	ld	hl, MsgErrFileTooBig
-	jr	c, CopyFileFromTapeError
-
-	ld	ix, FileData + TAPE_HDR_LEN + HDR_SZ
-	ld	de, (FileData+TAPE_HDR_BLOCK_LEN)
-	ld	a, TAPE_BLOCK_ID_BLK
-	scf
-	call	TAPE_LOAD
-	jr	nc, CopyFileFromTapeErrorLoading
+	jp	c, CopyFileFromTapeError	
 	
 	;Convert tape header to disk header and save file.
-	ld	a, (FileData + TAPE_HDR_TYPE)
-	ld	(FileData + TAPE_HDR_LEN + HDR_TYPE), a
+	ld	a, (TAPE_COPY_WORK_BUF + TAPE_HDR_TYPE)
+	ld	(TAPE_COPY_HDR_BUF + HDR_TYPE), a
 		
-	ld	hl, (FileData + TAPE_HDR_BLOCK_LEN)
-	ld	(FileData + TAPE_HDR_LEN + HDR_LEN), hl
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)
+	ld	(TAPE_COPY_HDR_BUF + HDR_LEN), hl
 	
-	ld	hl, (FileData + TAPE_HDR_BLOCK_START)
-	ld	(FileData + TAPE_HDR_LEN + HDR_ADDR), hl
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_START)
+	ld	(TAPE_COPY_HDR_BUF + HDR_ADDR), hl
 	
-	ld	hl, (FileData + TAPE_HDR_VARS)
-	ld	(FileData + TAPE_HDR_LEN + HDR_PLEN), hl
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_VARS)
+	ld	(TAPE_COPY_HDR_BUF + HDR_PLEN), hl
 	
-	ld	hl, (FileData + TAPE_HDR_BLOCK_START)
-	ld	(FileData + TAPE_HDR_LEN + HDR_LINE), hl	
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_START)
+	ld	(TAPE_COPY_HDR_BUF + HDR_LINE), hl
+	
+	;Save current drive in work buffer before is being overwritten by the loaded tape block.
+	ld	a, (RWTSDrive)
+	inc	a			;CP/M drive number to BASIC drive number
+	ld	(TAPE_COPY_CUR_DRIVE), a	
+	
+	;Move tape block loading and file saving code to printer buffer, to not be overwritten by the tape block.
+	ld	de, PRN_BUF
+	ld	hl, CopyFileFromTapeMobilePartStart
+	ld	bc, CopyFileFromTapeMobilePartEnd - CopyFileFromTapeMobilePartStart
+	ldir
+	
+	ld	hl, IF1FileSave	
+	ld	bc, IF1FileSaveEnd - IF1FileSave - 1	;Don't RET
+	ldir
+	
+	ld	hl, CopyFileFromTapeRestorePartStart
+	ld	bc, CopyFileFromTapeRestorePartEnd - CopyFileFromTapeRestorePartStart
+	ldir
+	
+	jp	PRN_BUF
+	
+CopyFileFromTapeMobilePartStart:	
+	;Load main block.
+	ld	ix, TAPE_COPY_HDR_BUF + HDR_SZ	
+	ld	de, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)
+	ld	a, TAPE_BLOCK_ID_BLK
+	scf
+	inc	d
+	ex	af, af'
+	dec	d
+	di
+	call	TAPE_LOAD
+	jr	nc, CopyFileFromTapeMobilePartStart
 	
 	;Calculate sector count, considering header length.
-	ld	hl, (FileData + TAPE_HDR_LEN + HDR_LEN)
+	ld	hl, (TAPE_COPY_HDR_BUF + HDR_LEN)
 	ld	bc, HDR_SZ
 	add	hl, bc
 	ld	a, l
@@ -920,20 +952,43 @@ CopyFileFromTapeExactKB:
 	jr	z, CopyFileFromTapeExactKB2
 	inc	b
 CopyFileFromTapeExactKB2:	
-
+	
 	;Adjust name from 10 to 11 chars.
-	ld	hl, FileData + TAPE_HDR_NAME + TAPE_HDR_NAME_LEN
+	ld	hl, TAPE_COPY_WORK_BUF + TAPE_HDR_NAME + TAPE_HDR_NAME_LEN
 	ld	(hl), ' '
-	ld	hl, FileData + TAPE_HDR_NAME
+	ld	hl, TAPE_COPY_WORK_BUF + TAPE_HDR_NAME	
 	
-	ld	de, FileData + TAPE_HDR_LEN	
-	call	IF1FileSave
+	;Save new file.
+	ld	de, TAPE_COPY_HDR_BUF
+	ld	a, (TAPE_COPY_CUR_DRIVE)
+CopyFileFromTapeMobilePartEnd:		
+	
+	;call	IF1FileSave	
+	
+CopyFileFromTapeRestorePartStart:
+	;Restore program image from paged RAM.
+	ld	a, HC_CFG_ROM_CPM | HC_CFG_ROM_E000
+	di
+	out	(HC_CFG_PORT), a
+	
+	ld	hl, 0
+	ld	de, RUN_ADDR
+	ld	bc, EndCode - Start
+	ldir
+	
+	ld	a, HC_CFG_ROM_BAS | HC_CFG_ROM_0000
+	out	(HC_CFG_PORT), a
+	ei	
 		
-	ret
+	;restore stack and start from scratch.
+	pop	hl
+	pop	hl
+	pop	hl
+	ld	(ERRSP), hl
+	jp	Start
+CopyFileFromTapeRestorePartEnd:	
 	
 	
-CopyFileFromTapeErrorLoading:
-	ld	hl, MsgTapeLoadErr
 CopyFileFromTapeError:	
 	ld	de, LST_LINE_MSG + 6 << 8
 	ld	a, SCR_DEF_CLR | CLR_FLASH
@@ -944,7 +999,7 @@ CopyFileFromTapeError:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 CopyFileToTape:
-	ld	hl, MsgMenuToTape+3
+	ld	hl, MsgMenuToTape
 	ld	de, LST_LINE_MSG + 1 << 8
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
@@ -963,27 +1018,39 @@ CopyFileToTape:
 	;Check if file fits in available RAM.
 	ld	c, (ix + CACHE_HDR + HDR_LEN)
 	ld	b, (ix + CACHE_HDR + HDR_LEN + 1)
-	ld	hl, FileDataSize - TAPE_HDR_LEN	;Must have enough RAM for file data + tape block header
+	ld	hl, TAPE_COPY_MAX_RAM	;Must have enough RAM for file data + tape block header
 	or	a
 	sbc	hl, bc
 	ld	hl, MsgErrFileTooBig
 	jr	c, CopyFileFromTapeError
 	
-	;Convert file header to tape header, store in FileData.
+	;Convert file header to tape header.
 	ld	a, (ix + CACHE_HDR + HDR_TYPE)
-	ld	(FileData + TAPE_HDR_TYPE), a	
+	ld	(TAPE_COPY_WORK_BUF + TAPE_HDR_TYPE), a	
 	
 	;Copy file name, trunc to 10 chars.
 	push	ix
 	pop	hl
-	ld	de, FileData + TAPE_HDR_NAME
+	ld	de, TAPE_COPY_WORK_BUF + TAPE_HDR_NAME
 	ld	bc, TAPE_HDR_NAME_LEN
 	ldir
+	
+	;Copy file name also to temp buffer, for loading later.
+	push	ix
+	pop	hl
+	ld	de, TAPE_COPY_FILE_NAME
+	ld	bc, NAMELEN
+	ldir
+	
+	;Save drive to temp buffer.
+	ld	a, (RWTSDrive)
+	inc	a			;CP/M drive number to BASIC drive number
+	ld	(TAPE_COPY_CUR_DRIVE), a	
 	
 	;Block length
 	ld	l, (ix + CACHE_HDR + HDR_LEN)
 	ld	h, (ix + CACHE_HDR + HDR_LEN + 1)		
-	ld	(FileData + TAPE_HDR_BLOCK_LEN), hl	
+	ld	(TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN), hl	
 	
 	;Code block start or program start	
 	ld	a, (ix + CACHE_HDR + HDR_TYPE)
@@ -999,37 +1066,54 @@ CopyFileToTapeProg:
 	ld	h, (ix + CACHE_HDR + HDR_LINE + 1)
 	
 CopyFileToTapeSaveStart:	
-	ld	(FileData + TAPE_HDR_BLOCK_START), hl
+	ld	(TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_START), hl
 	
 	;Program length/variables offset.
 	ld	l, (ix + CACHE_HDR + HDR_PLEN)
 	ld	h, (ix + CACHE_HDR + HDR_PLEN + 1)
-	ld	(FileData + TAPE_HDR_VARS), hl
-				
-	;Read file in RAM.
-	push	ix				;HL=file name
-	pop	hl
-	ld	de, FileData + TAPE_HDR_LEN
-	call	IF1FileLoad	
+	ld	(TAPE_COPY_WORK_BUF + TAPE_HDR_VARS), hl
 	
-	;Save header.
+	;Save tape block header.
 	ld	a, TAPE_BLOCK_ID_HDR
-	ld	ix, FileData
+	ld	ix, TAPE_COPY_WORK_BUF
 	ld	de, TAPE_HDR_LEN
 	call	TAPE_SAVE	
 	
-	;Save main block to tape.
-	ld	a, TAPE_BLOCK_ID_BLK
-	ld	ix, FileData + TAPE_HDR_LEN
-	ld	de, (FileData + TAPE_HDR_BLOCK_LEN)	
-	call	TAPE_SAVE
+	;Relocate file load and tape save code, to not be overwritten by loaded file.
 	
-	ret
+	ld	hl, IF1FileLoad
+	ld	de, PRN_BUF
+	ld	bc, IF1FileLoadEnd - IF1FileLoad - 1
+	ldir
+	
+	ld	hl, CopyFileToTapeSaveBlock
+	ld	bc, CopyFileToTapeSaveBlockEnd - CopyFileToTapeSaveBlock
+	ldir
+	
+	ld	hl, CopyFileFromTapeRestorePartStart
+	ld	bc, CopyFileFromTapeRestorePartEnd - CopyFileFromTapeRestorePartStart
+	ldir
+	
+	;Read file in RAM.
+	ld	a, (TAPE_COPY_CUR_DRIVE)
+	ld	hl, TAPE_COPY_FILE_NAME
+	ld	de, TAPE_COPY_LOAD_ADDR	
+	jp	PRN_BUF
+		
+	;call	IF1FileLoad		
+	
+	;Save main block to tape.
+CopyFileToTapeSaveBlock:	
+	ld	a, TAPE_BLOCK_ID_BLK
+	ld	ix, TAPE_COPY_LOAD_ADDR
+	ld	de, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)	
+	call	TAPE_SAVE
+CopyFileToTapeSaveBlockEnd:		
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 DisplayTapeBlockInfo:
-	ld	hl, FileData+TAPE_HDR_NAME
+	ld	hl, TAPE_COPY_WORK_BUF + TAPE_HDR_NAME
 	ld	de, MsgFileNameN
 	ld	bc, TAPE_HDR_NAME_LEN	
 	ldir
@@ -1041,7 +1125,7 @@ DisplayTapeBlockInfo:
 	ld	de, LST_LINE_MSG + 2 << 8
 	call	PrintStr
 
-	ld	a, (FileData+TAPE_HDR_TYPE)
+	ld	a, (TAPE_COPY_WORK_BUF + TAPE_HDR_TYPE)
 	cp	PROG_TYPE
 	ld	hl, MsgFileTypePrg
 	jr	z, DisplayTapeBlockType
@@ -1067,16 +1151,22 @@ DisplayTapeBlockType:
 	ld	de, LST_LINE_MSG + 3 << 8
 	call	PrintStr	
 	
-	ld	hl, (FileData+TAPE_HDR_BLOCK_START)
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_START)
 	ld	de, MsgFileStartN
 	call	Word2Txt
+	ld	e, ' '
+	ld	d, ' ' | $80
+	ld	(MsgFileStartN + 5), de
 	ld	hl, MsgFileStart
 	ld	de, LST_LINE_MSG + 4 << 8
 	call	PrintStr
 	
-	ld	hl, (FileData+TAPE_HDR_BLOCK_LEN)
+	ld	hl, (TAPE_COPY_WORK_BUF + TAPE_HDR_BLOCK_LEN)
 	ld	de, MsgFileLenN
 	call	Word2Txt
+	ld	h, 'B' | $80
+	ld	l, ' '
+	ld	(MsgFileLenN + 5), hl
 	ld	hl, MsgFileLen
 	ld	de, LST_LINE_MSG + 5 << 8
 	call	PrintStr	

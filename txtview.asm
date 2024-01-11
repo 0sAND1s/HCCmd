@@ -4,8 +4,8 @@
 LINE_CNT	EQU	23
 COL_CNT		EQU	64
 
-CHAR_CR	EQU	$0D
-CHAR_LF	EQU	$0A
+CHAR_CR		EQU	$0D
+CHAR_LF		EQU	$0A
 CHAR_TAB	EQU	$09
 CHAR_EOF	EQU	$1A
 
@@ -20,17 +20,34 @@ SCRLinesUp	EQU	SCRLinesDown + LINE_CNT*2
 TextViewer:	
 	call	TextViewIndex
 	
-	;Get file size and divide by RAM buffer size, to get total file parts.
+	;If showing programs as decoded BASIC, use program length as file length.
+	ld	ix, (SelFileCache)	
+	ld	a, (ix + CACHE_HDR + HDR_TYPE)	
+	cp	PROG_TYPE
+	jr	nz, TextViewerNotProgram
+		
+	ld	a, (ViewSelOption)
+	cp	'3'
+	jr	nz, TextViewerNotProgram
+	
+	ld	l, (ix + CACHE_HDR + HDR_PLEN)
+	ld	h, (ix + CACHE_HDR + HDR_PLEN + 1)
+	jr	TextViewerCalcPartCount	
+
+TextViewerNotProgram:	
+	;Get file size and divide by RAM buffer size, to get total number of file parts to display.
 	ld	hl, (SelFileCache)
 	call	GetFileSize
-	;Divide by the buffer size set for the current visualisation type (text/hex).
+
+TextViewerCalcPartCount:
+	;Divide by the buffer size set for the current visualisation type (text/hex/BASIC).
 	ld	a, (ViewSectMax)
 	ld	d, a
 	ld	e, 0
 	ld	a, h
 	ld	c, l
 	ld	hl, 0
-	call	Div2
+	call	Div2		;A:C div DE => A:C = Quotient, HL = Remainder
 	ex	de, hl
 	ld	h, a
 	ld	l, c
@@ -38,10 +55,14 @@ TextViewer:
 	or	e
 	jr	z, TextViewerBlockCountNoReminder
 	inc	hl
+
+TextViewerBlockCountNoReminder:		
+	;Put part count in variable and use that for scroll down instead of file reading result code.
+	ld	a, l
+	ld	(ViewFilePartCount), a
 	ld	de, MsgFilePartTotal
 	call	Byte2Txt
 	
-TextViewerBlockCountNoReminder:	
 	ld	hl, 0
 	ld	(COORDS), hl			
 	call	ScrollInit	
@@ -225,9 +246,12 @@ TextViewerScrollDown:
 	jr	nz, TextViewerScrollDown1
 	
 	;Exit if not end of file.
-	ld	a, (CopyFileRes)
-	or	a
-	jp	nz, TextViewerLoop3
+	ld	a, (ViewFilePartCount)
+	ld	l, a
+	ld	a, (ViewFilePart)
+	inc	a
+	cp	l
+	jp	z, TextViewerLoop3
 	ret
 	
 TextViewerScrollDown1:
@@ -401,6 +425,7 @@ LineCount	DEFW	0
 FirstLineShown	DEFW	0
 LastLineShown	DEFW	0
 	
+	IF LANG_EN == 1
 MsgLine	defb	'File:'
 MsgLineFileName defb 	'           |'
 		defb	'Line:'
@@ -411,5 +436,19 @@ MsgFilePart	defb	'   /'
 MsgFilePartTotal	defb	'   |'
 		defs	10, ' '
 		defb	'|0:Exi', 't' | $80
+	
+	ELSE
+	
+MsgLine	defb	'Fisier:'
+MsgLineFileName defb 	'           |'
+		defb	'Linie:'
+MsgLineNo	defb	'     /'
+MsgLineTotal	defb	'     |'
+		defb	'Parte:'
+MsgFilePart	defb	'   /'
+MsgFilePartTotal	defb	'   |'
+		defs	7, ' '
+		defb	'|0:Ie', 's' | $80		
+	ENDIF
 	
 	ENDIF

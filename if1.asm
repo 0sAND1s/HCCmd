@@ -102,7 +102,7 @@ REPPER		EQU	23562
 PIP		EQU	23609
 LAST_K		EQU	$5C08
 
-TAPE_LOAD		EQU	$0556
+TAPE_LOAD		EQU	$0562		;Originally $0556, but we want return to our code, not ROM error routine.
 TAPE_SAVE		EQU	$04C2
 TAPE_HDR_LEN		EQU	17
 TAPE_HDR_NAME_LEN	EQU	10
@@ -211,11 +211,7 @@ FormatDisk:
 AU2TS:
 	ld c, SPT/SPAL
 	call Div			;A = sector
-	push af
-		/*
-		ld c, HEAD_CNT
-		call Div		;L = track, A = head (0 or 1)
-		*/
+	push af		
 		xor a
 		rr h
 		rr l
@@ -653,19 +649,17 @@ MisMatch:
 ;Read a file into a buffer, sector by sector.
 ;It's relocatable, to moved and be used when loading a CODE block.
 ;It's not using BDOS, but using similar calls provided by IF1.
-;In: HL = Name address, DE = buffer
+;In: HL = Name address, DE = buffer, A = drive
 IF1FileLoad:
 	push	de
-		ld (FSTR1), hl
-		ld h, 0
-		ld a, (RWTSDrive)
-		inc  a	;CP/M drive number to BASIC drive number
+		ld	(FSTR1), hl
+		ld	h, 0		
 		ld	l, a
-		ld (DSTR1), hl
-		ld l,NAMELEN
-		ld (NSTR1), hl
-		rst 08
-		DEFB 51	;open disk channel
+		ld	(DSTR1), hl
+		ld	l,NAMELEN
+		ld	(NSTR1), hl
+		rst	08
+		DEFB	51	;open disk channel
 
 		rst	8		
 		defb	53	;read sector
@@ -709,14 +703,12 @@ FileFree:
 IF1FileLoadEnd:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;In: HL = Name address, DE = buffer, B = number of sectors to save
+;In: A=drive, HL = Name address, DE = buffer, B = number of sectors to save
 IF1FileSave:
 	push	de
 	push	bc
 		ld	(FSTR1), hl
 		ld	h, 0
-		ld	a, (RWTSDrive)
-		inc	a	;CP/M drive number to BASIC drive number
 		ld	l, a
 		ld	(DSTR1), hl
 		ld	l,NAMELEN
@@ -746,10 +738,10 @@ IF1FileSaveLoop:
 	pop	bc
 	djnz	IF1FileSaveLoop
 	
-IF1FileSaveEnd:
 	rst	8
 	defb	52	;close channel (52) or detroy channel (56)
 	ret
+IF1FileSaveEnd:	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HL = destination buffer, B = count of sectors, DE = track/sector
@@ -1019,7 +1011,7 @@ PrmStepRate	DEFB	$0D	;(milisec)
 PrmHeadLoad	DEFB	$23	;(milisec)
 PrmSpinUp	DEFB	$64	;(1/100 sec)	
 	ELSE ;Reduce original parameters by a factor, instead of setting all to 1s, to increase compatibility with some bad drivers. Minimal values worked for me, but might not work for some users, depending on drive.
-PrmFastFactor	EQU	4
+PrmFastFactor	EQU	5
 PrmDevType	DEFB	$01
 PrmStepRate	DEFB	$0D/PrmFastFactor	;(milisec)
 PrmHeadLoad	DEFB	$23/PrmFastFactor	;(milisec)

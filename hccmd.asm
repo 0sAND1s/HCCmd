@@ -45,7 +45,7 @@ HCRunInitDisk:
 	cp	$FF
 	jr	nz, DetectTrackCount		
 		
-	ld		a, DRIVE_A_CPM		;When loaded from tape/serial, no disk is selected, just select drive 1.	
+	ld	a, DRIVE_A_CPM		;When loaded from tape/serial, no disk is selected, just select drive 1.	
 
 DetectTrackCount:
 	push	af
@@ -67,7 +67,7 @@ DriveIs80Tracks:
 	ld	(AUCntMaxFree), hl	
 
 	call 	ReadCatalogTrack
-	or		a				;Signal disk read error. On empty drive code 5 is shown.
+	or	a				;Signal disk read error. On empty drive code 5 is shown.
 	jr	z, HCRunCacheFiles
 	
 	ld	l, a
@@ -116,10 +116,12 @@ ErrorHandler:
 	ld	a, SCR_DEF_CLR | CLR_FLASH
 	call	PrintStrClr
 	
-	;Display the error message, if > 26, since those < 26 are specific to the regular ROM.
 	ld	a, (ERRNR)
+	/*
+	;Display the error message, if > 26, since those < 26 are specific to the regular ROM.		
 	cp	26+1
 	jr	c, ErrorHandlerEnd
+	*/
 	call	GetErrMsg
 
 	ld	hl, DataBuf
@@ -129,7 +131,7 @@ ErrorHandler:
 
 ErrorHandlerEnd:
 	call	ReadChar
-	;call	BDOSInit
+	call	BDOSInit
 	jp	Start
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -656,7 +658,7 @@ CheckDiskMenuFormat1:
 	
 	ld	a, DRIVE_A_CPM
 	ld	(RWTSDrive), a	
-	ld	hl, MsgMenuFmt1+3
+	ld	hl, MsgMenuFmt1
 	jr	FormatDiskAction
 	
 CheckDiskMenuFormat2:
@@ -665,7 +667,7 @@ CheckDiskMenuFormat2:
 	
 	ld	a, DRIVE_B_CPM
 	ld	(RWTSDrive), a	
-	ld	hl, MsgMenuFmt2+3
+	ld	hl, MsgMenuFmt2
 	
 FormatDiskAction:		
 	ld	de, LST_LINE_MSG + 1 << 8
@@ -967,6 +969,9 @@ HandleFileCODE:
 	ld	bc, $12A2		;Jump to ROM main loop
 	push	bc
 	push	de					;push CODE address to return to = start of CODE block	
+	;Put current drive in A
+	ld	a, (RWTSDrive)
+	inc	a
 	jp	PRN_BUF
 
 
@@ -983,6 +988,8 @@ HandleFileSCR:
 	IFDEF _REAL_HW_
 		;Load to alternate SCREEN$ memory
 		ld	de, HC_VID_ADDR_C000
+		ld	a, (RWTSDrive)
+		inc	a
 		call	IF1FileLoad
 		
 		;Set display to alternate SCREEN$ memory
@@ -996,6 +1003,8 @@ HandleFileSCR:
 		out 	(HC_CFG_PORT), a	
 	ELSE
 		ld	de, HC_VID_ADDR_4000
+		ld	a, (RWTSDrive)
+		inc	a
 		call	IF1FileLoad		
 		
 		call	ReadChar
@@ -1089,7 +1098,22 @@ ViewFileAsHex:
 	
 	
 ViewFileAsBASIC:		
-	ld	b, MAX_SECT_BUF/ViewFileConvertRatioBASIC	;Load half of available RAM with program bytecode, leave half for decoded text.
+	;TODO: Must load only the BASIC part, not including variables.	
+	ld	ix, (SelFileCache)
+	ld	c, (ix + CACHE_HDR + HDR_PLEN)
+	ld	b, (ix + CACHE_HDR + HDR_PLEN + 1)
+	ld	a, c
+	or	a
+	jr	z, ViewFileAsBASICWholeSector
+	inc	b
+ViewFileAsBASICWholeSector:	
+	;Determine how many sectors to load in RAM, the actual prog. lenght or if too big, the max no. of sectors for BASIC.
+	ld	a, MAX_SECT_BUF/ViewFileConvertRatioBASIC
+	cp	b
+	jr	nc, ViewFileAsBASICProgLen
+	ld	b, a
+	
+ViewFileAsBASICProgLen:	
 	call	ReadFileForViewing							
 	;Read program length from header. Skip file header.
 	ld	bc, HDR_SZ
@@ -1173,7 +1197,7 @@ ReadFileForViewing:
 	ld	(ViewSectMax), a
 	ld 	a, (RWTSDrive)
 	inc	a
-	call		ReadFileSection	;DE = last address read
+	call	ReadFileSection	;DE = last address read
 
 	;Calculate size of read buffer.
 	push	de
@@ -1487,7 +1511,7 @@ DontInc:
 	pop	bc
 	jr	ReadAllHeadersEnd
 		
-	
+;Includes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	include "hccfg.asm"
@@ -1499,91 +1523,183 @@ DontInc:
 	include "serial.asm"
 	include "bas2txt.asm"	
 
+;Strings in English/Romanian
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-VerMsg1		DEFM	'HCCmd ', __DATE__
-VerMsg2		DEFM	'George Chirtoac', 'a' + $80
-MsgSysInf	DEFM	'Program Info   ', ' ' + $80
-MsgDskInf	DEFM	'Disk Info      ', ' ' + $80
-MsgFileInf	DEFM	'File Info      ', ' ' + $80
-MsgMessages	DEFM	'Messages       ', ' ' + $80
-BtnBar		DEFM	'1-A:|2-B:|3-View|4-Prop|5-Copy|6-Ren|7-Attr|8-Del|9-Disk|0-Exi', 't' + $80
-MsgDrive	DEFM	'Drv/Free:  '
-MsgDriveLet	DEFM	'A', '/'
-MsgFreeSpaceNo	DEFM	'000'
-MsgFilesCnt	DEFM	'Files/KB:'
-MsgFilesCntNo	DEFM	'000/000'
-MsgErr		DEFM	'Error code '
-MsgErrCode	DEFM	'000',' ' + $80
-MsgLoadingPrg	DEFM	'Loading Progra', 'm' + $80
-MsgLoadingSCR	DEFM	'Loading SCREEN', '$' + $80
-MsgLoadingCODE	DEFM	'Loading CODE (!', ')' + $80
-MsgFileSzDsk	DEFM	'Disk Len:'
-MsgFileSzDskN	DEFM	'00000 ', 'K' + $80
-MsgFileAttr	DEFM	'Attrib  :'
-MsgFileAttrN	DEFM	'R/O,HI', 'D' + $80
-MsgFileType	DEFM	'Type    :'
-MsgFileTypeN	DEFM	'         ', ' ' + $80
-MsgFileTypePrg	DEFM	'Progra', 'm' + $80
-MsgFileTypeByte	DEFM	'Bytes ', ' ' + $80
-MsgFileTypeSCR	DEFM	'SCREEN', '$' + $80
-MsgFileTypeChrA	DEFM	'Chr.Ar', 'r' + $80
-MsgFileTypeNoA	DEFM	'No. Ar', 'r' + $80
-MsgFileTypeText	DEFM	'Untype', 'd' + $80
-MsgNA		DEFM	'N/A   ', ' ' + $80
-MsgFileLen	DEFM	'Length  :'
-MsgFileLenN	DEFM	'65535 ', 'B' + $80
-MsgFileStart	DEFM	'Start   :'
-MsgFileStartN	DEFM	'65535 ', ' ' + $80
-MsgReadingExt	DEFM	'Reading heade', 'r' | $80
-MsgClear	DEFM	'               ', ' ' | $80
-MsgDelete	DEFM	'Del file? y/', 'n' | $80
-MsgSetRO	DEFM	'Set R/O? y/', 'n' | $80
-MsgSetSYS	DEFM	'Set HID? y/', 'n' | $80
-MsgNewFileName	DEFM	'Name?none=abort', ':' | $80
-MsgMenuDiskCopy	DEFM	'Disk menu', ':' | $80
-MsgMenuFileCopy	DEFM	'File copy menu', ':' | $80
-MsgMenuBack	DEFM	'0. Exit men', 'u' | $80
+VerMsg1			DEFM		'HCCmd ', __DATE__
+VerMsg2			ABYTEC 0	'George Chirtoaca'
 
-MsgMenuSingle	DEFM	'1. Copy '
-MsgMenuSingleDrv1	DEFM	'A:->'
-MsgMenuSingleDrv2	DEFM	'A', ':' | $80
+	IF LANG_EN == 1
+MsgSysInf		ABYTEC 0 	'Program Info    '
+MsgDskInf		ABYTEC 0 	'Disk Info       '
+MsgFileInf		ABYTEC 0 	'File Info       '
+MsgMessages		ABYTEC 0 	'Messages        '
+BtnBar			ABYTEC 0 	'1-A: 2-B: 3-View 4-Prop 5-Copy 6-Ren 7-Attr 8-Del 9-Disk 0-Exit'
+MsgDrive		DEFM		'Drv/Free:  '
+MsgDriveLet		DEFM		'A', '/'
+MsgFreeSpaceNo		DEFM		'000'
+MsgFilesCnt		DEFM		'Files/KB:'
+MsgFilesCntNo		DEFM		'000/000'
+MsgErr			DEFM		'Error code '
+MsgErrCode		ABYTEC 0	'000 '
+MsgLoadingPrg		ABYTEC 0 	'Loading Program'
+MsgLoadingSCR		ABYTEC 0 	'Loading SCREEN$'
+MsgLoadingCODE		ABYTEC 0 	'Loading CODE (!)'
+MsgFileSzDsk		DEFM		'Disk Len:'
+MsgFileSzDskN		ABYTEC 0 	'00000 K'
+MsgFileAttr		DEFM		'Attrib  :'
+MsgFileAttrN		ABYTEC 0 	'R/O,HID'
+MsgFileType		DEFM		'Type    :'
+MsgFileTypeN		ABYTEC 0 	'          '
+MsgFileTypePrg		ABYTEC 0 	'Program'
+MsgFileTypeByte		ABYTEC 0 	'Bytes  '
+MsgFileTypeSCR		ABYTEC 0 	'SCREEN$'
+MsgFileTypeChrA		ABYTEC 0 	'Chr.Arr'
+MsgFileTypeNoA		ABYTEC 0 	'No. Arr'
+MsgFileTypeText		ABYTEC 0 	'Untyped'
+MsgNA			ABYTEC 0 	'N/A    '
+MsgFileLen		DEFM		'Length  :'
+MsgFileLenN		ABYTEC 0 	'65535 B'
+MsgFileStart		DEFM		'Start   :'
+MsgFileStartN		ABYTEC 0 	'65535  '
+MsgReadingExt		ABYTEC 0 	'Reading header'
+MsgClear		ABYTEC 0 	'                '
+MsgDelete		ABYTEC 0 	'Del file? y/n'
+MsgSetRO		ABYTEC 0 	'Set R/O? y/n'
+MsgSetSYS		ABYTEC 0 	'Set HID? y/n'
+MsgNewFileName		ABYTEC 0 	'Name?none=abort:'
+MsgMenuDiskCopy		ABYTEC 0 	'Disk menu:'
+MsgMenuFileCopy		ABYTEC 0 	'File copy menu:'
+MsgMenuBack		ABYTEC 0 	'0. Exit menu'
 
-MsgMenuDual	DEFM	'2. Copy '
-MsgMenuDualDrv1	DEFM	'A:->'
-MsgMenuDualDrv2	DEFM	'B', ':' | $80
+MsgMenuSingle		DEFM		'1. Copy '
+MsgMenuSingleDrv1	DEFM		'A:->'
+MsgMenuSingleDrv2	ABYTEC 0 	'A:'
 
-MsgMenuToCOM	DEFM	'3. Copy '
-MsgMenuToComDrv	DEFM	'A:->CO', 'M' | $80
+MsgMenuDual		DEFM		'2. Copy '
+MsgMenuDualDrv1		DEFM		'A:->'
+MsgMenuDualDrv2		ABYTEC 0 	'B:'
 
-MsgMenuFromCOM		DEFM	'4. Copy COM->'
-MsgMenuFromCOMDrv	DEFM	'A', ':' | $80
+MsgMenuToCOM		DEFM		'3. Copy '
+MsgMenuToComDrv		ABYTEC 0 	'A:->COM'
 
-MsgMenuFromTape		DEFM	'5. Copy Tape->'
-MsgMenuFromTapeDrv	DEFM	'A', ':' | $80
+MsgMenuFromCOM		DEFM		'4. Copy COM->'
+MsgMenuFromCOMDrv	ABYTEC 0 	'A:'
 
-MsgMenuToTape		DEFM	'6. Copy '
-MsgMenuToTapeDrv	DEFM	'A:->Tap', 'e' | $80
+MsgMenuFromTape		DEFM		'5. Copy Tape->'
+MsgMenuFromTapeDrv	ABYTEC 0 	'A:'
 
-MsgMenuFmt1	DEFM	'5. Format A', ':' | $80
-MsgMenuFmt2	DEFM	'6. Format B', ':' | $80
+MsgMenuToTape		DEFM		'6. Copy '
+MsgMenuToTapeDrv	ABYTEC 0 	'A:->Tape'
 
-MsgBlocksLeft	DEFM	'000 blocks lef', 't' | $80
-MsgFileOverwrite	DEFM	'Overwrite? y/', 'n' | $80
-MsgFileExists	DEFM	'File name exist', 's' | $80
-MsgInsertSrcDsk	DEFM	'Put SOURCE dis', 'k' | $80
-MsgInsertDstDsk	DEFM	'Put DEST. disk', ' ' | $80
-MsgPressAnyKey	DEFM	'Press any ke', 'y' | $80
-MsgCopySectors	DEFM	'000 sectors cop', 'y' | $80
-MsgAreYouSure	DEFM	'Are you sure?y/', 'n' | $80
-MsgViewFileMenu	DEFM	'View file menu', ':' | $80
-MsgViewFileText	DEFM	'1.As tex', 't' | $80
-MsgViewFileHex	DEFM	'2.As he', 'x' | $80
-MsgViewFileAuto	DEFM	'3.Auto-1/2/BASI', 'C' | $80
+MsgMenuFmt1		ABYTEC 0 	'5. Format A:'
+MsgMenuFmt2		ABYTEC 0 	'6. Format B:'
 
-MsgTapeLoadErr		DEFM	'Tape load erro', 'r' | $80
-MsgErrFileTooBig	DEFM	'File too bi', 'g' | $80
-MsgFileName		DEFM	'Name: '
-MsgFileNameN		DEFM	'          '
+MsgBlocksLeft		ABYTEC 0 	'000 blocks left'
+MsgFileOverwrite	ABYTEC 0 	'Overwrite? y/n'
+MsgFileExists		ABYTEC 0 	'File name exists'
+MsgInsertSrcDsk		ABYTEC 0 	'Put SOURCE disk'
+MsgInsertDstDsk		ABYTEC 0 	'Put DEST. disk '
+MsgPressAnyKey		ABYTEC 0 	'Press any key'
+MsgCopySectors		ABYTEC 0 	'000 sectors copy'
+MsgAreYouSure		ABYTEC 0 	'Are you sure?y/n'
+MsgViewFileMenu		ABYTEC 0 	'View file menu:'
+MsgViewFileText		ABYTEC 0 	'1.As text'
+MsgViewFileHex		ABYTEC 0 	'2.As hex'
+MsgViewFileAuto		ABYTEC 0 	'3.Auto-1/2/BASIC'
+
+MsgErrFileTooBig	ABYTEC 0 	'File too big'
+MsgFileName		DEFM		'Name: '
+MsgFileNameN		DEFM		'          '
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	ELSE
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MsgSysInf		ABYTEC 0 	'Info program    '
+MsgDskInf		ABYTEC 0 	'Info disc       '
+MsgFileInf		ABYTEC 0 	'Info fisier     '
+MsgMessages		ABYTEC 0 	'Mesaje          '
+BtnBar			ABYTEC 0 	'1-A: 2-B: 3-Vad 4-Prop 5-Copie 6-Red 7-Atrb 8-Sterg 9-Disc 0-Ies'
+MsgDrive		DEFM		'A-B/Liber: '
+MsgDriveLet		DEFM		'A', '/'
+MsgFreeSpaceNo		DEFM		'000'
+MsgFilesCnt		DEFM		'NrFis/KB:'
+MsgFilesCntNo		DEFM		'000/000'
+MsgErr			DEFM		'Cod eroare  '
+MsgErrCode		ABYTEC 0	'000 '
+MsgLoadingPrg		ABYTEC 0 	'Incarc Program '
+MsgLoadingSCR		ABYTEC 0 	'Incarc SCREEN$ '
+MsgLoadingCODE		ABYTEC 0 	'Incarc CODE (!)'
+MsgFileSzDsk		DEFM		'Pe disc :'
+MsgFileSzDskN		ABYTEC 0 	'00000 K'
+MsgFileAttr		DEFM		'Atribute:'
+MsgFileAttrN		ABYTEC 0 	'R/O,HID'
+MsgFileType		DEFM		'Tip     :'
+MsgFileTypeN		ABYTEC 0 	'          '
+MsgFileTypePrg		ABYTEC 0 	'Program'
+MsgFileTypeByte		ABYTEC 0 	'Bytes  '
+MsgFileTypeSCR		ABYTEC 0 	'SCREEN$'
+MsgFileTypeChrA		ABYTEC 0 	'Chr.Arr'
+MsgFileTypeNoA		ABYTEC 0 	'No. Arr'
+MsgFileTypeText		ABYTEC 0 	'Fara   '
+MsgNA			ABYTEC 0 	'Indisp.'
+MsgFileLen		DEFM		'Lungime :'
+MsgFileLenN		ABYTEC 0 	'65535 B'
+MsgFileStart		DEFM		'Start   :'
+MsgFileStartN		ABYTEC 0 	'65535   '
+MsgReadingExt		ABYTEC 0 	'Citesc antet...'
+MsgClear		ABYTEC 0 	'                '
+MsgDelete		ABYTEC 0 	'Sterg fis.? y/n'
+MsgSetRO		ABYTEC 0 	'Setare R/O? y/n'
+MsgSetSYS		ABYTEC 0 	'Setare HID? y/n'
+MsgNewFileName		ABYTEC 0 	'Nume?gol=renunt'
+MsgMenuDiskCopy		ABYTEC 0 	'Meniu disc:'
+MsgMenuFileCopy		ABYTEC 0 	'Meniu copiere:'
+MsgMenuBack		ABYTEC 0 	'0.Iesire meniu'
+
+MsgMenuSingle		DEFM		'1.Copiez '
+MsgMenuSingleDrv1	DEFM		'A:->'
+MsgMenuSingleDrv2	ABYTEC 0 	'A:'
+
+MsgMenuDual		DEFM		'2.Copiez '
+MsgMenuDualDrv1		DEFM		'A:->'
+MsgMenuDualDrv2		ABYTEC 0 	'B:'
+
+MsgMenuToCOM		DEFM		'3.Copiez '
+MsgMenuToComDrv		ABYTEC 0 	'A:->COM'
+
+MsgMenuFromCOM		DEFM		'4.Copiez COM->'
+MsgMenuFromCOMDrv	ABYTEC 0 	'A:'
+
+MsgMenuFromTape		DEFM		'5.Copiez CAS->'
+MsgMenuFromTapeDrv	ABYTEC 0 	'A:'
+
+MsgMenuToTape		DEFM		'6.Copiez '
+MsgMenuToTapeDrv	ABYTEC 0 	'A:->CAS'
+
+MsgMenuFmt1		ABYTEC 0 	'5.Formatare A:'
+MsgMenuFmt2		ABYTEC 0 	'6.Formatare B:'
+
+MsgBlocksLeft		ABYTEC 0 	'000 blocuri ram.'
+MsgFileOverwrite	ABYTEC 0 	'Suprascriu? y/n'
+MsgFileExists		ABYTEC 0 	'Numele exista!'
+MsgInsertSrcDsk		ABYTEC 0 	'Intr. disc SURSA'
+MsgInsertDstDsk		ABYTEC 0 	'Intr. disc DEST.'
+MsgPressAnyKey		ABYTEC 0 	'Apasa o tasta'
+MsgCopySectors		ABYTEC 0 	'000 sect. copiat'
+MsgAreYouSure		ABYTEC 0 	'Confirmati? y/n'
+MsgViewFileMenu		ABYTEC 0 	'Meniu viz. fis.:'
+MsgViewFileText		ABYTEC 0 	'1.Ca text'
+MsgViewFileHex		ABYTEC 0 	'2.Ca hexa'
+MsgViewFileAuto		ABYTEC 0 	'3.Auto-1/2/BASIC'
+
+MsgErrFileTooBig	ABYTEC 0 	'Fisier prea mare'
+MsgFileName		DEFM		'Nume: '
+MsgFileNameN		DEFM		'          '	
+	
+	ENDIF
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	IFNDEF	_REAL_HW_
 FontTable:	
@@ -1604,7 +1720,8 @@ CopySelOption		EQU	SelFileCache+2		;1 B
 ViewSelOption		EQU	CopySelOption + 1
 ViewSectMax		EQU	ViewSelOption + 1
 ViewFilePart		EQU	ViewSectMax+1
-FileBlocksIdxPos	EQU	ViewFilePart+1
+ViewFilePartCount	EQU	ViewFilePart+1
+FileBlocksIdxPos	EQU	ViewFilePartCount+1
 
 CopyFileFCB		EQU	FileBlocksIdxPos + 2
 CopyFileRes		EQU	CopyFileFCB + 2
@@ -1636,8 +1753,8 @@ TrackBuf		EQU	DataBuf	;size = 16 * 256 = 4096
 ;File viewer constants
 FileData		EQU	DataBuf
 ;4K index allows for 2000 lines of text.
-FileIdxSize		EQU	3 * 1024
-;The number of 2-byte offsets of each block loaded in RAM.
+FileIdxSize		EQU	4 * 1024
+;The number of 2-byte file offsets of each block loaded in RAM.
 FileIdxBlocksSize	EQU	50
 ;File buffer size, without index
 FileDataSize		EQU	(MAX_SECT_RAM * SECT_SZ) - FileIdxSize - FileIdxBlocksSize
@@ -1647,13 +1764,21 @@ FileBlocksIdx		EQU	FileIdx + FileIdxSize
 MAX_SECT_BUF		EQU	FileDataSize/SECT_SZ
 
 
-;Copy buffer size, follows 
+;Copy buffer
 CopyDiskBuf		EQU DataBuf
 
-;256 bytes for the stack should be enough.
-MAX_RAM_FREE		EQU	$FF00 - DataBuf
+RAM_END			EQU	$FF00				;256 bytes for the stack should be enough.
+MAX_RAM_FREE		EQU	RAM_END - DataBuf
 MAX_AU_RAM		EQU	MAX_RAM_FREE/AU_SZ
 MAX_SECT_RAM		EQU	MAX_RAM_FREE/SECT_SZ
+
+;Tape block copy buffers.
+TAPE_COPY_MAX_RAM	EQU	40 * 1024			;40KB just fits between the system variables and stack.
+TAPE_COPY_LOAD_ADDR	EQU	RAM_END - TAPE_COPY_MAX_RAM
+TAPE_COPY_WORK_BUF	EQU	PRN_BUF + 200			;work area for tape and file header processing
+TAPE_COPY_HDR_BUF	EQU	TAPE_COPY_LOAD_ADDR - HDR_SZ
+TAPE_COPY_CUR_DRIVE	EQU	TAPE_COPY_WORK_BUF + TAPE_HDR_LEN
+TAPE_COPY_FILE_NAME	EQU	TAPE_COPY_CUR_DRIVE + 1
 
 	DISPLAY "DataBuf addr: ", /D,DataBuf
 	DISPLAY "BinSize: ", /D, EndCode - Start

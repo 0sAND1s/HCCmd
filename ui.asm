@@ -129,21 +129,21 @@ KbdHit:
 
 InitFonts:
 	IFUSED
-    ;page-in CPM ROM to get fonts
-    di
-    ld a, HC_CFG_ROM_CPM
-    out	(HC_CFG_PORT), a
+	;page-in CPM ROM to get fonts
+	di
+	ld	a, HC_CFG_ROM_CPM
+	out	(HC_CFG_PORT), a
 	
 	ld	hl, CPM_FNT_ADDR
 	ld	de, FontTable
 	ld	bc, 872
 	ldir
 	
-    ;restore BASIC ROM
-    ld a, HC_CFG_ROM_BAS
-    out	(HC_CFG_PORT), a
-    ei
-	
+	;restore BASIC ROM
+	ld	a, HC_CFG_ROM_BAS
+	out	(HC_CFG_PORT), a
+	ei
+
 	ret
 	ENDIF
 
