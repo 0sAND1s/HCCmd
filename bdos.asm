@@ -238,6 +238,7 @@ DoesFileExistOnDisk:
 	push	af
 		call	DestroyChannel
 	pop	af
+	inc	a
 	ret
 	ENDIF
 	
@@ -254,7 +255,7 @@ DoesFileExistInCache:
 ;IN: E0 = RO, E1 = SYS, HL=filename
 ChangeFileAttrib:
 	ld 	a, (RWTSDrive)
-	inc		a				;Convert to BASIC drive number: 1,2
+	inc	a				;Convert to BASIC drive number: 1,2
 	push	de
 	call	CreateChannel
 	pop	de
@@ -284,7 +285,7 @@ FileAttribSet:
 ;Works only on the same drive.
 RenameFile:
 	ld 	a, (RWTSDrive)
-	inc		a				;Convert to BASIC drive number: 1,2
+	inc	a				;Convert to BASIC drive number: 1,2
 	push	de
 	call	CreateChannel
 	pop	de
@@ -345,7 +346,7 @@ PromptDiskChangeSrc:
 ;6. enter copy loop: ask for SRC disk, read file part, ask for DST disk, write file part, check end, loop.
 CopyFile:				
 	ld 	a, (RWTSDrive)
-	inc		a				;Convert to BASIC drive number: 1,2
+	inc	a				;Convert to BASIC drive number: 1,2
 	ld	(CopyFileSrcDrv), a
 	ld	(CopyFileDstDrv), a
 	ld	de, CopyFileSrcName
@@ -454,8 +455,12 @@ CopyFileCheckOverwrite:
 	ld	a, (CopyFileDstDrv)
 	ld	hl, CopyFileDstName
 	call	DoesFileExistOnDisk
-	ret	z					;return Z=1 when file exist
+	or	a
+	jr	nz, CopyFileCheckOverwriteAsk		;returns A > 0 when file exists.
+	xor	a
+	ret						;Return Z=1 when file not found.
 	
+CopyFileCheckOverwriteAsk:	
 	;Ask overwrite confirmation.
 	ld	hl, MsgFileOverwrite
 	ld	de, LST_LINE_MSG + 1 << 8
@@ -463,7 +468,7 @@ CopyFileCheckOverwrite:
 	call	PrintStrClr
 	call	ReadChar	
 	cp	'y'
-	ret							;return Z=1 when user confirmed file overwrite
+	ret						;return Z=1 when user confirmed file overwrite
 	
 
 CopyFileCreateNewFile:		
