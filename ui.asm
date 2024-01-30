@@ -7,7 +7,7 @@
 
 COL		EQU 23728
 LINE		EQU 23729               ;Coordinates
-LineCol		EQU	COL
+LineCol		EQU COL
 CODE		EQU 23681               ;Char to print
 
 CPM_FNT_ADDR	EQU $25AB
@@ -58,15 +58,16 @@ SCR_COLS		EQU 64
 SCR_LINES		EQU 24
 
 ;used for file names list positioning
-LST_LINES_CNT	EQU	21
-LST_FIRST_LINE	EQU	1
-LST_LAST_LINE	EQU LST_FIRST_LINE + LST_LINES_CNT
-LST_PROG_INFO	EQU LST_FIRST_LINE
-LST_DISK_INFO	EQU LST_PROG_INFO + 3
-LST_FILE_INFO	EQU LST_DISK_INFO + 3
-LST_LINE_MSG	EQU LST_FILE_INFO + 6
-LST_FIRST_COL	EQU	16
-LST_MAX_FILES	EQU LST_LINES_CNT * 4
+LST_LINES_CNT		EQU	21
+LST_FIRST_LINE		EQU	1
+LST_LAST_LINE		EQU LST_FIRST_LINE + LST_LINES_CNT
+LST_PROG_INFO		EQU LST_FIRST_LINE
+LST_DISK_INFO		EQU LST_PROG_INFO + 3
+LST_FILE_INFO		EQU LST_DISK_INFO + 3
+LST_LINE_MSG		EQU LST_FILE_INFO + 6
+LST_FIRST_COL		EQU	16
+LST_MAX_FILES		EQU LST_LINES_CNT * 4
+LST_MAX_FILES_ON_DISK	EQU 128
 
 ;key codes
 KEY_ESC		EQU	7
@@ -80,7 +81,7 @@ KEY_CTRL	EQU	14
 
 SCR_DEF_CLR	EQU INK_CYAN | PAPER_BLACK | CLR_BRIGHT
 SCR_SEL_CLR	EQU INK_BLACK | PAPER_GREEN | CLR_BRIGHT
-SCR_LBL_CLR	EQU	SCR_SEL_CLR
+SCR_LBL_CLR	EQU SCR_SEL_CLR
 
 ;Special formating chars
 CHR_CR		EQU	13
@@ -573,8 +574,205 @@ ClearNMsgLinesLoop:
 	djnz	ClearNMsgLinesLoop
 	
 	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+Byte2HexHex:		
+	push	hl
+		push	de
+			ld	a, (hl)
+			call	ByteToHex		
+		pop	ix
+		
+		ld	(ix), d
+		ld	(ix+1), e
+		ld	d, ixh
+		ld	e, ixl
+		inc	de
+		inc	de
+	pop	hl
+	inc	hl
+	
+	ret
+		
+Byte2HexChar:	
+	;The text viewer goes down one line when finding a CR char, so we must replace the CR char.
+	ld	a, CHAR_CR
+	cp	(hl)
+	jr	nz, Bin2HexLineLoopTextCopy
+	
+Bin2HexLineLoopTextReplace:	
+	ld	a, '.'
+	ld	(hl), a
+	
+Bin2HexLineLoopTextCopy:	
+	ldi
+	ret
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+HEX_COLUMNS	EQU	16
+
+;Line structure, allowing 2 hex digits per screen cell, for using the attribute color as cursor.
+;Max file size is 636KB = $9F000
+;123456||12345678||12345678||12345678||12345678||0123456789ABCDEF
+;HIOFFS:_11223344__55667788__11223344__55667788__0123456789ABCDEF
+
+Bin2HexLine:
+	;Offset
+	push	hl
+		push	de
+			ld	a, (HexOffsetHi)
+			call	ByteToHex
+		pop	ix		
+		
+		ld	(ix), d
+		ld	(ix+1), e
+		inc	ix
+		inc	ix
+		
+		ld	hl, (HexOffset)
+		call	Word2Hex				
+				
+		ld	(ix), h
+		ld	(ix+1), l
+		ld	(ix+2), d
+		ld	(ix+3), e
+		
+		ld	d, ixh
+		ld	e, ixl	
+	pop	hl
+	push	hl
+	
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	ld	a, ':'
+	ld	(de), a
+	inc	de
+	ld	a, ' '
+	ld	(de), a
+	inc	de
+	
+	;Hex part	
+	ld	c, 4
+Bin2HexLineLoopHex1:	
+	push	bc
+	ld	b, 4	
+Bin2HexLineLoopHex:
+	call	Byte2HexHex	
+	djnz	Bin2HexLineLoopHex
+	
+	ld	a, ' '
+	ld	(de), a
+	inc	de
+	ld	(de), a
+	inc	de
+	
+	pop	bc
+	dec	c
+	jr	nz, Bin2HexLineLoopHex1	
+	
+	;ld	ixh, d
+	;ld	ixl, e
+	;ld	(ix - (HEX_COLUMNS/2)*3 - 1), a
+	
+	;String part
+	pop	hl	
+Bin2HexLineText:	
+	;just to not alter B with LDI, set C to something > 16
+	ld	bc, (HEX_COLUMNS << 8) | HEX_COLUMNS*2
+Bin2HexLineLoopText:
+	call	Byte2HexChar
+	djnz	Bin2HexLineLoopText
+	ret
+		
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Converts binary buffer at HL to hex string at DE with length in BC.
+Bin2HexStr:		
+	push	hl
+		ld	ix, (FileBlocksIdxPos)		
+		ld	l, (ix)
+		ld	h, (ix+1)		
+		
+		ld	a, REC_SZ
+		push	de
+		push	bc
+		ex	de, hl
+		call	Mul
+		pop	bc
+		pop	de
+		
+		ld	(HexOffset), hl
+		xor	a
+		ld	(HexOffsetHi), a
+	pop	hl
+	
+	;Calculate the number of full lines by dividing BC to 16.	
+	xor	a
+	
+	rr	b
+	rr	c
+	rra
+	
+	rr	b
+	rr	c
+	rra
+
+	rr	b
+	rr	c
+	rra
+
+	rr	b
+	rr	c
+	rra
+	
+	rra
+	rra
+	rra
+	rra
+	
+	or	a
+	jr	z, Bin2HexWholeLine
+	inc	bc
+	
+Bin2HexWholeLine:	
+	ex		af, af'		;Keep reminder
+	
+Bin2HexStrLoop:	
+	push	bc		
+		call	Bin2HexLine
+		push	hl
+			ld	hl, (HexOffset)
+			ld	bc, HEX_COLUMNS
+			add	hl, bc			
+			ld	(HexOffset), hl
+			ld	a, (HexOffsetHi)
+			adc	0
+			ld	(HexOffsetHi), a
+		pop	hl
+	pop	bc
+	
+	dec	bc
+	ld	a, b
+	or	c
+	jr	nz, Bin2HexStrLoop
+
+	;Set remaining imcomplete line.	
+	;Exit if last line is empty.
+	ex	af, af'	
+	or	a
+	ret	z	
+	
+	;TODO: Clean up part of the line that is past the end of file.
+		
+	
+	ret	
 
 CurrScrAddr	DEFW	SCR_ADDR
 CurrScrAttrAddr	DEFW	SCR_ATTR_ADDR
+HexOffsetHi	DEFB	$AB
+HexOffset	DEFW	$CDEF
 
    	endif

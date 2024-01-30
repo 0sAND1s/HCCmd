@@ -383,7 +383,7 @@ CopyDiskLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr	
 	
 	;Calculate how many blocks to read = min(MAX_AU_RAM, blocks left)
@@ -531,7 +531,7 @@ CopyDiskToCOMLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr			
 	
 	;Read block into buffer
@@ -591,7 +591,7 @@ CopyDiskFromCOMLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr			
 	
 	;Read block buffer
@@ -885,7 +885,7 @@ ReadHeaderEnd:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Checks if the file header is valid. For now it checks to not have all 0s.
-;Some text files can be mistakend for Program files, because the first byte is 0 == PROG_TYPE.
+;Some binary files can be mistakend for Program files, because the first byte is 0 == PROG_TYPE.
 ;In: HL = header
 ;Out: A > 0 if valid
 IsFileHeaderValid:

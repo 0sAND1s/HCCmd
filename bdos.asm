@@ -189,12 +189,10 @@ GetFileSize:
 	jr	GetFileSizeEnd
 	
 GetFileSizeOK:	
-	;*128 == 2^7
-	ld	b, 7
-GetFileSizeMul:	
-	rl	l
-	rl	h
-	djnz	GetFileSizeMul
+	;Multiply by 128 to get no. of bytes.
+	ld	a, REC_SZ
+	ex	de, hl
+	call	Mul
 
 GetFileSizeEnd:
 	push	hl
@@ -309,11 +307,11 @@ RenameFile:
 PromptDiskChangeDst:
 	ld	hl, MsgInsertDstDsk
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	ld	hl, MsgPressAnyKey
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar	
 	ret
@@ -321,11 +319,11 @@ PromptDiskChangeDst:
 PromptDiskChangeSrc:
 	ld	hl, MsgInsertSrcDsk
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	ld	hl, MsgPressAnyKey
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar	
 	ret
@@ -388,7 +386,7 @@ CopyFile:
 	
 	ld	hl, MsgMenuFileCopy
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	ld	hl, MsgMenuBack
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -464,7 +462,7 @@ CopyFileCheckOverwriteAsk:
 	;Ask overwrite confirmation.
 	ld	hl, MsgFileOverwrite
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar	
 	cp	'y'
@@ -524,7 +522,7 @@ CopyFileSameDriveLoop:
 	call	Byte2Txt
 	ld	hl, MsgCopySectors
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 
 	ld	a, (CopyFileRes)		;Save read status code.
@@ -594,7 +592,7 @@ CopyFileDualDriveLoop:
 	call	Byte2Txt
 	ld	hl, MsgCopySectors
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 		
 	ld	a, (CopyFileRes)
 	push	af
@@ -654,7 +652,7 @@ CopyFileFromCOM:
 	;Must ask for the new file name and check to not exist.	
 	ld	hl, MsgNewFileName
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgClear
@@ -833,7 +831,7 @@ CopyFilePtr2 EQU $+2
 CopyFileFromTape:
 	ld	hl, MsgMenuFromTape
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 CopyFileFromTapeLoadHeader:	
@@ -996,7 +994,7 @@ CopyFileFromTapeRestorePartEnd:
 	
 CopyFileFromTapeError:	
 	ld	de, LST_LINE_MSG + 6 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	ret
@@ -1006,7 +1004,7 @@ CopyFileFromTapeError:
 CopyFileToTape:
 	ld	hl, MsgMenuToTape
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 	;Read header for file size.

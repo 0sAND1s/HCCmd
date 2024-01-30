@@ -1,7 +1,7 @@
 	ifndef	_MATH_
 	define	_MATH_
 
-;The folowing 3 routines where inspired or taken from: Milos "baze" Bazelides, baze@stonline.sk
+;The folowing 4 routines where inspired/adapted from: Milos "baze" Bazelides, baze@stonline.sk
 ;http://map.tni.nl/sources/external/z80bits.html
 
 
@@ -128,13 +128,14 @@ NoAdd:
 	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;IN: HL=address to read, DE=output address	for 2 chars
-Byte2Hex:	
+;IN: HL=address to read, DE=output address for 2 chars
+BytePtr2Hex:	
+	IFUSED
 	xor	a
 	rld
-	call	Byte2HexNibble
+	call	BytePtr2HexNibble
 
-Byte2HexNibble:
+BytePtr2HexNibble:
 	push	af
 	daa
 	add	a,$F0
@@ -145,157 +146,63 @@ Byte2HexNibble:
 
 	pop	af
 	rld
-	ret	
-		
-
-Byte2HexHex:	
-	call	Byte2Hex			
-	inc	hl
-	ld	a, ' '
-	ld	(de), a
-	inc	de	
-	ret
-		
-Byte2HexChar:	
-	ld	a, CHAR_CR
-	cp	(hl)
-	jr	nz, Bin2HexLineLoopTextCopy
-	
-Bin2HexLineLoopTextReplace:	
-	ld	a, '.'
-	ld	(hl), a
-	
-Bin2HexLineLoopTextCopy:	
-	ldi
-	ret
-
-
-HEX_COLUMNS	EQU	16
-
-Bin2HexLine:		
-	;Hex part	
-	ld	b, HEX_COLUMNS
-	push	hl
-Bin2HexLineLoopHex:
-		call	Byte2HexHex
-		djnz	Bin2HexLineLoopHex	
-	pop	hl
-	
-	dec	de
-	ld	a, CHR_V
-	ld	(de), a
-	inc	de
-	
-	ld	ixh, d
-	ld	ixl, e
-	ld	(ix - (HEX_COLUMNS/2)*3 - 1), a
-	
-	;String part
-Bin2HexLineText:	
-	;just to not alter B with LDI, set C to something > 16
-	ld	bc, (HEX_COLUMNS << 8) | HEX_COLUMNS*2
-Bin2HexLineLoopText:
-	call	Byte2HexChar
-	djnz	Bin2HexLineLoopText
-	ret
-		
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;Converts binary buffer at HL to hex string at DE
-Bin2HexStr:		
-	;Calculate the number of full lines by dividing BC to 16.	
-	xor	a
-	
-	rr	b
-	rr	c
-	rra
-	
-	rr	b
-	rr	c
-	rra
-
-	rr	b
-	rr	c
-	rra
-
-	rr	b
-	rr	c
-	rra
-	
-	rra
-	rra
-	rra
-	rra
-	
-	ex		af, af'		;Keep reminder
-	
-Bin2HexStrLoop:	
-	push	bc		
-		call	Bin2HexLine
-	pop	bc
-	
-	dec	bc
-	ld	a, b
-	or	c
-	jr	nz, Bin2HexStrLoop
-
-	;Set remaining imcomplete line.	
-	;Exit if last line is empty.
-	ex	af, af'	
-	or	a
-	ret	z
-	ex	af, af'
-	
-	;Clear the whole last line.
-	push	de
-	push	hl
-		ld	a, ' '		
-		ld	b, COL_CNT
-Bin2HexLineClear:		
-		ld	(de), a
-		inc	de
-		djnz	Bin2HexLineClear			
-	pop	hl
-	pop	de	
-	
-	;Save start of last line.
-	push	de
-	pop	ix
-	push	ix
-	
-	;Save start of char part in IX.
-	ld	bc, HEX_COLUMNS*3
-	add	ix, bc	
-	
-	;Write the hex and char parts of line.
-	ex	af, af'
-	ld	b, a	
-	ld	c, HEX_COLUMNS*2
-
-Bin2HexLineLoopHex2:
-	call	Byte2HexHex
-	dec	hl
-	
-	push	de
-		ld	e, ixl
-		ld	d, ixh
-		ld	c, 1
-		call	Byte2HexChar
-	pop	de
-	
-	inc	ix
-	djnz	Bin2HexLineLoopHex2	
-	
-	;Save end of buffer in DE, to let the caller know where the buffer ends.
-	ld	e, ixl
-	ld	d, ixh
-	
-	pop	ix
-	;Write delimiters.
-	ld	a, CHR_V
-	ld	(ix + HEX_COLUMNS*3/2 - 1), a
-	ld	(ix + HEX_COLUMNS*3 - 1), a
-		
 	ret		
+	ENDIF
+
+;Converts A into text hex number in DE
+ByteToHex:   
+	ld	c, a   ; a = number to convert
+	call	ByteToHex1
+	ld	d, a
+	ld	a, c
+	call	ByteToHex2
+	ld	e, a
+	ret  ; return with hex number in de
+
+ByteToHex1:    
+	rra
+	rra
+	rra
+	rra
+ByteToHex2:    
+	or	$F0
+	daa
+	add	a, $A0
+	adc	a, $40 ; Ascii hex at this point (0 to F)   
+	ret
+
+
+;Number in HL converted is converted to 4 byte hex chars in DE:HL.
+Word2Hex:
+	ld	a, h
+	call	ByteToHex
+	ld	a, l
+	ex	de, hl
+	call	ByteToHex	
+	ret
+	
+	
+;Convert 2 digit hex number from DE to A.	
+HexToNum:
+	IFUSED
+	ld   a,d
+	call Hex1
+	add  a,a
+	add  a,a
+	add  a,a
+	add  a,a
+	ld   d,a
+	ld   a,e
+	call Hex1
+	or   d
+	ret
+
+Hex1:    
+	sub  a,'0'
+	cp   10
+	ret  c
+	sub  a,'A'-'0'-10
+	ret	
+	ENDIF
 
 	endif

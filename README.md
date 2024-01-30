@@ -2,12 +2,12 @@ HCCommander 1.0 - File manager for ICE Felix HC 8-bit computers - george[dot]chi
 
 The main features of this program are:
 - The UI is using custom 64 text columns display and using semi-graphical chars. Program can be built for English or Romanian language.
-- Errors don't crash the program and shown using error code and decoded error message.
-- Supported disk drive types are BASIC format (not CP/M yet) with 80 tracks/3.5"/640KB and 40 tracks/5.25"/320KB and the type is detected automatically.
-- File listing works for up to 84 files, which should cover most disks.
+- Errors don't crash the program and are displayed using error code and decoded error message.
+- Supported disk drive types are BASIC format (not for the CP/M format) with 80 tracks/3.5"/640KB and 40 tracks/5.25"/320KB and the type is detected automatically.
+- File listing works for up to 128 files (maximum supported by the file system).
 - File properties are shown: size on disk, logical size, file type, file attributes, start address of code blocks/start line of program blocks.
 - Disk properties are shown: selected drive (A/B), free space, number of files, total space occupied by files.
-- File operations are: view, read properties from file header, copy, rename, change attributes, delete.
+- File operations are: view file, read properties from file header, copy, rename, change attributes, delete.
 - Files of any size can be viewed as text or as hex, using up/down scrolling. Program files can also be shown as decoded BASIC code.
 - File copy operations support: dual drive copy, single drive copy, from disk to serial port, from serial port to disk, from tape to disk, from disk to tape.
 - Disk operations supported: disk copy dual drive, disk copy single drive, disk copy to serial port, disk copy from serial port, format A:/B:.
@@ -40,7 +40,7 @@ Text file listing
 ![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/TextView.gif)
 
 
-Required hardware: HC-2000, HC-91+IF1, HC-90+IF1, HC-85+IF1.
+Required hardware: HC-2000, HC-91+IF1, HC-90+IF1
 
 Options:
 

@@ -36,7 +36,7 @@ HCRunInitDisk:
 	ld	d, h
 	ld	e, l
 	inc	de
-	ld	bc, LST_MAX_FILES*CACHE_SZ - 1
+	ld	bc, LST_MAX_FILES_ON_DISK * CACHE_SZ - 1
 	ld	(hl), 0
 	ldir
 
@@ -76,18 +76,28 @@ DriveIs80Tracks:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	BDOSInit
 	jp	HCRunInitDisk
 	
 
 HCRunCacheFiles:
-	call 	GetFileNames	
+	call 	GetFileNames
+	
+	;Init column numbers
+	xor	a
+	ld	(FirstColumnShown), a	
+	ld	(FirstFileShownIdx), a
+
 	
 HCRunMain:
 	call 	InitUI		
+HCRunMain2:	
+	call	CalcFileCache
 	call	DisplayFilenames
+	call	CalcFileCache
+	call	DisplayFileInfo
 	call	DisplayDiskInfo		
 	jp	ReadKeyLoop
 
@@ -113,7 +123,7 @@ ErrorHandler:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 	ld	a, (ERRNR)
@@ -126,7 +136,7 @@ ErrorHandler:
 
 	ld	hl, DataBuf
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 
 ErrorHandlerEnd:
@@ -188,8 +198,8 @@ InitUI:
 	ld	a, SCR_LBL_CLR
 	ld	hl, MsgMessages
 	ld	de, LST_LINE_MSG << 8
-	call	PrintStrClr	
-
+	call	PrintStrClr
+		
 	ld	a, SCR_SEL_CLR
 	call	DrawCursor
 
@@ -247,21 +257,35 @@ DisplayDiskInfo:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 CalcFileCache:
-	ld	a, (SelFile)
+	ld	a, (FirstColumnShown)
+	ld	de, LST_LINES_CNT
+	call	Mul
+	ld	a, l
+	ld	(FirstFileShownIdx), a
+	
+	ld	a, (FileCnt)
+	sub	l
+	cp	LST_MAX_FILES
+	jr	c, CalcFileCacheListNotFull
+	ld	a, LST_MAX_FILES
+
+CalcFileCacheListNotFull:
+	ld	(FileCountOnScreen), a
+	
+	ld	a, (SelFile)	
+	add	l
 	ld	de, CACHE_SZ
 	call	Mul
 	ld	bc, FileCache
-	add		hl, bc				;HL = file AU cnt
+	add	hl, bc				;HL = file AU cnt
 	ld	(SelFileCache), hl
+		
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-ReadKeyLoop:
-	call	CalcFileCache
-	call	DisplayFileInfo
-
+ReadKeyLoop:	
 	call	ReadChar	
 
 	cp	KEY_DOWN
@@ -269,13 +293,34 @@ ReadKeyLoop:
 	cp 	'a'
 	jr	nz, CheckUp
 
-DoKeyDown:
-	ld	a, (FileCnt)
+DoKeyDown:		
+	ld	a, (FileCountOnScreen)
 	ld	b, a
 	ld	a, (SelFile)
 	inc	a
 	cp	b
+	jr	c, DoKeyDownGoDown
+	
+DoKeyNextColumn:	
+	;Advance to the next screen, if more files must be shown.
+	ld	a, (FileCnt)
+	ld	b, a
+	ld	a, (FileCountOnScreen)
+	ld	c, a
+	ld	a, (FirstFileShownIdx)
+	add	c
+	cp	b
 	jr	nc, ReadKeyLoop
+	
+	ld	a, (FirstColumnShown)
+	inc	a
+	ld	(FirstColumnShown), a
+	xor	a
+	ld	(SelFile), a
+	jp	HCRunMain
+	
+	
+DoKeyDownGoDown:	
 	ld	(SelFile), a
 	jp	MoveIt
 
@@ -288,8 +333,20 @@ CheckUp:
 DoKeyUp:
 	ld	a, (SelFile)
 	or	a
+	jr	nz, DoKeyUpGoUp
+	
+DoKeyGoPrevColumn:	
+	ld	a, (FirstColumnShown)
+	or	a
 	jr	z, ReadKeyLoop
+	dec	a
+	ld	(FirstColumnShown), a
+	xor	a
+	ld	(SelFile), a
+	jp	HCRunMain
+	
 
+DoKeyUpGoUp:
 	dec	a
 	ld	(SelFile), a
 	jp	MoveIt
@@ -301,12 +358,12 @@ CheckRight:
 	jr	nz, CheckLeft
 
 DoKeyRight:
-	ld	a, (FileCnt)
+	ld	a, (FileCountOnScreen)
 	ld	b, a
 	ld	a, (SelFile)
 	add	LST_LINES_CNT
-	cp	b
-	jr	nc, ReadKeyLoop
+	cp	b	
+	jr	nc, DoKeyNextColumn
 
 	ld	(SelFile), a
 	jp	MoveIt
@@ -320,7 +377,7 @@ CheckLeft:
 DoKeyLeft:
 	ld	a, (SelFile)
 	sub	LST_LINES_CNT
-	jr	c, ReadKeyLoop
+	jr	c, DoKeyGoPrevColumn	
 
 	ld	(SelFile), a
 	jp	MoveIt
@@ -346,9 +403,10 @@ CheckKeyInfo:
 	ld	ix, (SelFileCache)
 	ld	hl, MsgReadingExt
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadFileHeader
+	call	DisplayFileInfo
 	ld	b, 1
 	call	ClearNMsgLines
 	jp	ReadKeyLoop
@@ -373,7 +431,7 @@ CheckKeyCopy:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	jp	ReadKeyLoop
@@ -402,7 +460,8 @@ CheckKeyFileInfo:
 	or	a
 	jp	z, ReadKeyLoop
 	
-	call	ReadAllHeaders
+	call	ReadAllHeaders	
+	call	DisplayFileInfo
 	jp	ReadKeyLoop
 
 CheckKeyDriveA:
@@ -428,7 +487,7 @@ CheckKeyView:
 
 	ld	hl, MsgViewFileMenu
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	ld	hl, MsgViewFileText
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -454,7 +513,7 @@ CheckKeyRename:
 	
 	ld	hl, MsgNewFileName
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgClear
@@ -483,7 +542,7 @@ CheckKeyRename:
 
 	ld	hl, MsgFileExists
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	jr	RenameCanceled
@@ -509,7 +568,7 @@ CheckKeyDel:
 	
 	ld	hl, MsgDelete
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	cp	'y'
@@ -534,7 +593,7 @@ CheckKeyAttrib:
 	
 	ld	hl, MsgSetRO
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	ld	e, 0
@@ -546,7 +605,7 @@ CheckSYS:
 	push	de
 		ld	hl, MsgSetSYS
 		ld	de, LST_LINE_MSG + 2 << 8
-		ld	a, SCR_DEF_CLR | CLR_FLASH
+		ld	a, SCR_LBL_CLR
 		call	PrintStrClr
 		call	ReadChar
 		cp	'y'
@@ -588,7 +647,7 @@ CheckKeyDiskMenu:
 	
 	ld	hl, MsgMenuDiskCopy
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	ld	hl, MsgMenuBack
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -671,12 +730,12 @@ CheckDiskMenuFormat2:
 	
 FormatDiskAction:		
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgAreYouSure
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	cp	'y'
@@ -698,7 +757,7 @@ FormatDiskAction:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 	call	ReadChar
 	jp	HCRunInitDisk
@@ -712,14 +771,16 @@ CheckKeyExit:
 	jp	HCRunEnd
 	;jp		0				;Had to exit by reset, since after doing CLEAR in unpack.asm, we can't return to BASIC as before.
 
-MoveIt:
+MoveIt:	
 	call 	MoveCursor
+	call	CalcFileCache
+	call	DisplayFileInfo
 	jp	ReadKeyLoop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-DisplayFilename:
+DisplayFilename:	
 	LD	B, NAMELEN
 DispLoop:
 	LD	A, (DE)
@@ -763,17 +824,44 @@ LineOK:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-DisplayFilenames:		
-	ld	de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
-	ld	(LineCol), de	
-
-	ld	de, FileCache
+DisplayFilenames:	
+	;Exit if no files on disk.
 	ld	a, (FileCnt)
 	or	a
-	ret	z
+	ret	z					
 	
-	ld	b,	a
-
+	ld	a, ' '
+	ld	(FileData), a
+	or	$80
+	ld	(FileData + 2), a
+	ld	a, (FirstColumnShown)
+	add	'1' | $80		
+	ld	(FileData + 1), a
+	ld	b, 4
+	ld	de, LST_FIRST_COL + NAMELEN/2 + 1
+	
+PrintColumnNumberLoop:		
+	push	bc
+		ld	hl, FileData
+		call	PrintStr
+		ld	bc, NAMELEN
+		ex	de, hl
+		add	hl, bc
+		ex	de, hl		
+	pop	bc
+	ld	a, (FileData + 1)
+	inc	a	
+	ld	(FileData + 1), a
+	djnz	PrintColumnNumberLoop
+	
+	ld	de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
+	ld	(LineCol), de	
+	ld	a, e
+	ld	(NameCol), a
+	
+	ld	de, (SelFileCache)
+	ld	a, (FileCountOnScreen)
+	ld	b, a
 DisplayFilenamesLoop:
 	push	bc
 		push	de
@@ -864,10 +952,10 @@ StoreFilenamesLoop:
 	pop bc
 
 
-	ld 		a, (FileCnt)		;inc file counter
+	ld 	a, (FileCnt)		;inc file counter
 	inc	a
 	ld 	(FileCnt), a
-	cp	LST_MAX_FILES
+	cp	LST_MAX_FILES_ON_DISK
 	jr	c, NextExt
 	jr	GetFileNamesEnd
 
@@ -952,7 +1040,7 @@ HandleFile:
 HandleFileCODE:
 		ld	hl, MsgLoadingCODE
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_DEF_CLR | CLR_FLASH
+		ld	a, SCR_LBL_CLR
 		call	PrintStrClr
 
 		;Copy file load function to printer buffer to not be overwritten by CODE block.
@@ -980,7 +1068,7 @@ HandleFileCODE:
 HandleFileSCR:
 		ld	hl, MsgLoadingSCR
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_DEF_CLR | CLR_FLASH
+		ld	a, SCR_LBL_CLR
 		call	PrintStrClr
 
 	pop	hl
@@ -1015,7 +1103,7 @@ HandleFileSCR:
 HandleFileProg:
 		ld	hl, MsgLoadingPrg
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_DEF_CLR | CLR_FLASH
+		ld	a, SCR_LBL_CLR
 		call	PrintStrClr
 	pop	hl
 	call	LoadProgram
@@ -1097,8 +1185,7 @@ ViewFileAsHex:
 	jr	ViewFileText
 	
 	
-ViewFileAsBASIC:		
-	;TODO: Must load only the BASIC part, not including variables.	
+ViewFileAsBASIC:			
 	ld	ix, (SelFileCache)
 	ld	c, (ix + CACHE_HDR + HDR_PLEN)
 	ld	b, (ix + CACHE_HDR + HDR_PLEN + 1)
@@ -1221,14 +1308,15 @@ ReadFileForViewing:
 	ld	e, c
 	ld	a, CHAR_EOF
 	cpir
-	jr	nz, ReadFileForViewingNotFoundEOF
+	jr	nz, ReadFileForViewingNotFoundEOF	
 	inc	bc
+	
 ReadFileForViewingNotFoundEOF:	
 	or	a
 	ex	hl, de
 	sbc	hl, bc
 	ld	b, h
-	ld	c, l
+	ld	c, l	
 
 ReadFileForViewingNotText:	
 	ld	hl, FileData
@@ -1459,7 +1547,7 @@ MoveMsg:
 ReadAllHeaders:
 	ld	hl, MsgReadingExt
 	ld	de, LST_LINE_MSG+1 << 8
-	ld	a, SCR_DEF_CLR | CLR_FLASH
+	ld	a, SCR_LBL_CLR
 	call	PrintStrClr
 
 	call	CalcFileCache
@@ -1733,10 +1821,14 @@ CopyFileSrcDrv		EQU	CopyFileSectCnt + 1
 CopyFileSrcName		EQU	CopyFileSrcDrv + 1
 CopyFileDstDrv		EQU	CopyFileSrcName + 11
 CopyFileDstName		EQU	CopyFileDstDrv + 1
+FirstColumnShown	EQU	CopyFileDstName + 1
+FirstFileShownIdx	EQU	FirstColumnShown + 1
+FileCountOnScreen	EQU	FirstFileShownIdx + 1
 
-FileCache		EQU	CopyFileDstName + 11			;cache table, size = 92 * 25 = 2300
+FileCache		EQU	FileCountOnScreen + 1			;cache table, size = 92 * 25 = 2300
+
 ;FS block list constants
-UsedBlockListCnt	EQU	FileCache + LST_MAX_FILES*CACHE_SZ
+UsedBlockListCnt	EQU	FileCache + LST_MAX_FILES_ON_DISK * CACHE_SZ
 UsedBlockListBlk	EQU	UsedBlockListCnt + 2
 UsedBlockListSz		EQU	320 * 2 + 2						;640
 
