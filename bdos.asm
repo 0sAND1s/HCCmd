@@ -434,9 +434,8 @@ CopyFile:
 		
 	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file, 5=from tape to disk, 6=from disk to tape
 	cp	'0'
-	jr	nz, CopyFileNotExit
-	pop	hl	
-	jp	ReadKeyLoop
+	jr	nz, CopyFileNotExit	
+	ret
 	
 CopyFileNotExit:	
 	cp	'1'
@@ -456,9 +455,8 @@ CopyFileNotExit:
 	
 	cp	'6'
 	jp	z, CopyFileToTape
-	
-	pop	hl
-	jp	ReadKeyLoop
+		
+	ret
 			
 			
 ;OUT: Z=1 => file doesn't exist or overwrite was confirmed if it does exist.		
