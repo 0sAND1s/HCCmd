@@ -8,7 +8,7 @@
 ;So we have to put our code after the program as loaded in RAM.	
 	ORG RUN_ADDR
 	
-Start:	
+Start:		
 	IFDEF _REAL_HW_		;If using the fonts from the CP/M ROM, must copy font table to buffer.
 		call InitFonts
 	ENDIF
@@ -76,7 +76,7 @@ DriveIs80Tracks:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	BDOSInit
 	jp	HCRunInitDisk
@@ -95,8 +95,7 @@ HCRunMain:
 	call 	InitUI		
 HCRunMain2:	
 	call	CalcFileCache
-	call	DisplayFilenames
-	call	CalcFileCache
+	call	DisplayFilenames	
 	call	DisplayFileInfo
 	call	DisplayDiskInfo		
 	jp	ReadKeyLoop
@@ -123,7 +122,7 @@ ErrorHandler:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 	ld	a, (ERRNR)
@@ -136,7 +135,7 @@ ErrorHandler:
 
 	ld	hl, DataBuf
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 
 ErrorHandlerEnd:
@@ -148,16 +147,16 @@ ErrorHandlerEnd:
 
 InitUI:
 	xor	a
-	ld	(SelFile), A	
+	ld	(SelFile), a
 	ld	a, LST_FIRST_COL + 1
-	ld	(NameCol), A
+	ld	(NameCol), a
 	ld	de, (LST_FIRST_LINE << 8) | LST_FIRST_COL + 1
 	ld	(LineCol), de	
 	
 	call	ClrScr
 
 	ld	hl, SCR_BYTES_PER_LINE * LST_FIRST_LINE + LST_FIRST_COL/2
-	ld	bc, (CurrScrAttrAddr)
+	ld	bc, SCR_ATTR_ADDR
 	add	hl, bc
 	ld	(CursorAddr), hl
 	
@@ -399,27 +398,20 @@ CheckKeyInfo:
 	ld	a, (FileCnt)
 	or	a
 	jp	z, ReadKeyLoop
-	
-	ld	ix, (SelFileCache)
-	ld	hl, MsgReadingExt
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
-	call	PrintStrClr
-	call	ReadFileHeader
+		
+	call	ReadAllHeaders	
 	call	DisplayFileInfo
-	ld	b, 1
-	call	ClearNMsgLines
+		
 	jp	ReadKeyLoop
 	
 CheckKeyCopy:
 	cp	'5'
-	jp	nz, CheckKeyFileInfo
+	jp	nz, CheckKeyFileTag
 	
 	ld	a, (FileCnt)
 	or	a
 	jp	z, ReadKeyLoop	
-			
-	ld	hl, (SelFileCache)
+				
 	call	CopyFile		
 	ld	a, (CopyFileRes)
 	or	a
@@ -431,10 +423,10 @@ CheckKeyCopy:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar
-	jp	ReadKeyLoop
+	jp	HCRunInitDisk
 	
 CopyFileOK:		
 	ld	b, 6
@@ -452,7 +444,7 @@ CopyFileOK:
 	call	BDOSSelectDisk	;Select destination disk after copy, to show the new file list.
 	jp	HCRunInitDisk
 
-CheckKeyFileInfo:
+CheckKeyFileTag:
 	cp	' '
 	jr	nz, CheckKeyDriveA
 	
@@ -460,8 +452,13 @@ CheckKeyFileInfo:
 	or	a
 	jp	z, ReadKeyLoop
 	
-	call	ReadAllHeaders	
-	call	DisplayFileInfo
+	;Toggle highligt for current file.			
+	ld	ix, (SelFileCache)
+	ld	a, (ix + CACHE_FLAG)
+	xor	CACHE_FLAG_TAGGED
+	ld	(ix + CACHE_FLAG), a
+	ld	a, 1
+	call	DrawFileNameColor	
 	jp	ReadKeyLoop
 
 CheckKeyDriveA:
@@ -487,7 +484,7 @@ CheckKeyView:
 
 	ld	hl, MsgViewFileMenu
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	ld	hl, MsgViewFileText
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -513,7 +510,7 @@ CheckKeyRename:
 	
 	ld	hl, MsgNewFileName
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgClear
@@ -542,7 +539,7 @@ CheckKeyRename:
 
 	ld	hl, MsgFileExists
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar
 	jr	RenameCanceled
@@ -560,66 +557,137 @@ RenameCanceled:
 	
 CheckKeyDel:
 	cp	'8'
-	jr	nz, CheckKeyAttrib
+	jp	nz, CheckKeyAttrib
 	
 	ld	a, (FileCnt)
 	or	a
 	jp	z, ReadKeyLoop
-	
+						
+	ld	ix, MsgDeleteX
 	ld	hl, MsgDelete
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
-	call	PrintStrClr
-	call	ReadChar
-	cp	'y'
-	jr	z, DoFileDelete
-	ld	b, 1
-	call	ClearNMsgLines
+	call	PrintSelectedFilesMsg	
+	jr	z, DoFileDelete	
 	jp	ReadKeyLoop
+	
 DoFileDelete:	
+	ld	a, b
+	or	a
+	jr	nz, DoFileDeleteTaggedFiles
+	
 	ld	hl, (SelFileCache)
 	ld 	a, (RWTSDrive)
-	inc		a				;Convert to BASIC drive number: 1,2
+	inc	a				;Convert to BASIC drive number: 1,2
 	call	DeleteFile
+	jp	HCRunInitDisk
+	
+DoFileDeleteTaggedFiles:
+	ld	ix, FileCache
+	ld	b, MAX_EXT_CNT	
+	
+DoFileDeleteTaggedFilesLoop:	
+	ld	a, (ix + CACHE_FLAG)	
+	and	CACHE_FLAG_TAGGED	
+	jr	nz, DoFileDeleteTaggedFilesTagged		
+	ld	de, CACHE_SZ
+	add	ix, de
+	djnz	DoFileDeleteTaggedFilesLoop
+	jp	HCRunInitDisk
+	
+DoFileDeleteTaggedFilesTagged:	
+	push	ix
+	push	ix
+	pop	hl
+	push	bc
+	ld 	a, (RWTSDrive)
+	inc	a				;Convert to BASIC drive number: 1,2
+	call	DeleteFile
+	pop	bc
+	pop	ix
+	ld	de, CACHE_SZ
+	add	ix, de
+	djnz	DoFileDeleteTaggedFilesLoop	
 	jp	HCRunInitDisk
 	
 CheckKeyAttrib:
 	cp	'7'
-	jr	nz, CheckKeyDiskMenu
+	jp	nz, CheckKeyDiskMenu
 	
 	ld	a, (FileCnt)
 	or	a
 	jp	z, ReadKeyLoop
 	
-	ld	hl, MsgSetRO
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
-	call	PrintStrClr
-	call	ReadChar
-	ld	e, 0
-	cp	'y'	
-	jr	nz, CheckSYS
-	ld	e, 1
-
-CheckSYS:	
-	push	de
-		ld	hl, MsgSetSYS
-		ld	de, LST_LINE_MSG + 2 << 8
-		ld	a, SCR_LBL_CLR
+	ld	ix, MsgSetAttrCountX
+	ld	hl, MsgSetAttrCount
+	call	PrintSelectedFilesMsg	
+	jr	z, DoFileChangeAttr	
+	jp	ReadKeyLoop		
+	
+DoFileChangeAttr:
+	push	bc
+		ld	hl, MsgSetRO
+		ld	de, LST_LINE_MSG + 1 << 8
+		ld	a, SCR_ASK_CLR
 		call	PrintStrClr
 		call	ReadChar
-		cp	'y'
-	pop	de
-	jr	nz, AttrChange
-	ld	a, %10
-	or	e
-	ld	e, a
+		ld	e, 0
+		cp	CONFIRM_KEY	
+		jr	nz, CheckSYS
+		ld	e, 1
+
+CheckSYS:	
+		push	de
+			ld	hl, MsgSetSYS
+			ld	de, LST_LINE_MSG + 2 << 8
+			ld	a, SCR_ASK_CLR
+			call	PrintStrClr
+			call	ReadChar
+			cp	CONFIRM_KEY
+		pop	de
+		jr	nz, AttrChange
+		ld	a, %10
+		or	e
+		ld	e, a
+		
+AttrChange:	
+	pop	af
+	or	a
+	jr	nz, AttrChangeTaggedFiles
 	
-AttrChange:		
+	;Single file attribute change.
 	ld	hl, (SelFileCache)
 	call	ChangeFileAttrib
 	jp	HCRunInitDisk	
 	
+AttrChangeTaggedFiles:
+	ld	ix, FileCache
+	ld	b, MAX_EXT_CNT	
+	
+AttrChangeTaggedFilesLoop:	
+	ld	a, (ix + CACHE_FLAG)	
+	and	CACHE_FLAG_TAGGED	
+	jr	nz, AttrChangeTaggedFilesTagged
+	push	de
+	ld	de, CACHE_SZ
+	add	ix, de
+	pop	de
+	djnz	AttrChangeTaggedFilesLoop
+	jp	HCRunInitDisk
+	
+AttrChangeTaggedFilesTagged:	
+	push	de
+		push	ix	
+			push	ix
+			pop	hl	
+			push	bc	
+				call	ChangeFileAttrib		
+			pop	bc
+		pop	ix
+		ld	de, CACHE_SZ
+		add	ix, de
+	pop	de
+	djnz	AttrChangeTaggedFilesLoop	
+	jp	HCRunInitDisk	
+
 SelectDrive:
 	ld 	(RWTSDrive), a	
 	call	BDOSSelectDisk
@@ -647,7 +715,7 @@ CheckKeyDiskMenu:
 	
 	ld	hl, MsgMenuDiskCopy
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	ld	hl, MsgMenuBack
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -730,15 +798,15 @@ CheckDiskMenuFormat2:
 	
 FormatDiskAction:		
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgAreYouSure
 	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar
-	cp	'y'
+	cp	CONFIRM_KEY
 	jp	nz, HCRunMain
 	
 	ld	hl, MsgClear
@@ -757,7 +825,7 @@ FormatDiskAction:
 	call	Byte2Txt
 	ld	hl, MsgErr
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar
 	jp	HCRunInitDisk
@@ -862,21 +930,81 @@ PrintColumnNumberLoop:
 	ld	de, (SelFileCache)
 	ld	a, (FileCountOnScreen)
 	ld	b, a
+	
 DisplayFilenamesLoop:
-	push	bc
+	push	bc		
 		push	de
 		call	DisplayFilename
-		pop	de
-		ex	de, hl
+		pop	hl
 		ld	bc, CACHE_SZ
 		add	hl, bc
 		ex	de, hl
 	pop	bc
 	djnz	DisplayFilenamesLoop
+	
+	call	DisplayFilenamesColor
 
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DisplayFilenamesColor:			
+	ld	a, (FileCnt)
+	or	a
+	ret	z
+	
+	;Persist cursor address and selected file cache address, to restore later, since are altered here.
+	ld	hl, (CursorAddr)
+	push	hl
+	ld	hl, (SelFileCache)
+	push	hl
+			
+	ld	bc, LST_LINES_CNT
 
+DisplayFilenamesColorsLoop:				
+	push	bc
+		xor	a
+		call	DrawFileNameColor		
+		
+		;Point to the next file name color area and cache.
+		ld	hl, (CursorAddr)
+		ld	de, SCR_BYTES_PER_LINE
+		add	hl, de
+		ld	(CursorAddr), hl				
+			
+		ld	ix, (SelFileCache)			
+		ld	de, CACHE_SZ
+		add	ix, de
+		ld	(SelFileCache), ix				
+	pop	bc		
+	
+	ld	a, (FileCountOnScreen)		
+	inc	b
+	cp	b	
+	jr	z, DisplayFilenamesColorExit
+	
+	ld	a, c
+	cp	b
+	jr	nz, DisplayFilenamesColorsLoop
+	
+	ld	hl, (CursorAddr)
+	ld	de, (-LST_LINES_CNT * SCR_BYTES_PER_LINE) + (NAMELEN+1)/2	;go to the next column start
+	add	hl, de
+	ld	(CursorAddr), hl	
+	
+	;Update next column boundary to compare against.
+	ld	a, c
+	add	LST_LINES_CNT
+	ld	c, a
+	jr	DisplayFilenamesColorsLoop
+
+DisplayFilenamesColorExit:
+	pop	hl
+	ld	(SelFileCache), hl
+	pop	hl
+	ld	(CursorAddr), hl
+	ld	a, 1
+	call	DrawFileNameColor
+	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Selects only valid filenames (not deleted and only from first extension)
 GetFileNames:
@@ -1018,7 +1146,7 @@ HandleFile:
 	ld	ix, (SelFileCache)
 	push	ix
 		ld	a, (ix + CACHE_FLAG)
-		or	a
+		and	CACHE_FLAG_HDR_READ
 		call	z, ReadFileHeader
 
 		ld	a, (ix + CACHE_HDR + HDR_TYPE)
@@ -1040,7 +1168,7 @@ HandleFile:
 HandleFileCODE:
 		ld	hl, MsgLoadingCODE
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_LBL_CLR
+		ld	a, SCR_ASK_CLR
 		call	PrintStrClr
 
 		;Copy file load function to printer buffer to not be overwritten by CODE block.
@@ -1068,7 +1196,7 @@ HandleFileCODE:
 HandleFileSCR:
 		ld	hl, MsgLoadingSCR
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_LBL_CLR
+		ld	a, SCR_ASK_CLR
 		call	PrintStrClr
 
 	pop	hl
@@ -1103,7 +1231,7 @@ HandleFileSCR:
 HandleFileProg:
 		ld	hl, MsgLoadingPrg
 		ld	de, LST_LINE_MSG+1 << 8
-		ld	a, SCR_LBL_CLR
+		ld	a, SCR_ASK_CLR
 		call	PrintStrClr
 	pop	hl
 	call	LoadProgram
@@ -1140,7 +1268,7 @@ ViewFile:
 	;Read file header if not yet read.
 	ld	ix, (SelFileCache)
 	ld	a, (ix + CACHE_FLAG)
-	or	a
+	and	CACHE_FLAG_HDR_READ
 	call	z, ReadFileHeader
 	
 ViewFileNextBlock:		
@@ -1409,7 +1537,7 @@ AttrEnd:
 	pop	ix
 	push	ix
 		ld	a, (ix + CACHE_FLAG)
-		or	a
+		and	CACHE_FLAG_HDR_READ
 		jp	z, HeadNotRead
 
 		ld	a, (ix + CACHE_FIRST_AU)
@@ -1547,7 +1675,7 @@ MoveMsg:
 ReadAllHeaders:
 	ld	hl, MsgReadingExt
 	ld	de, LST_LINE_MSG+1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 
 	call	CalcFileCache
@@ -1569,7 +1697,8 @@ NextFile:
 		add	ix, bc
 		push	ix
 		call	CalcFileCache
-		call	DisplayFileInfo
+		call	DisplayFileInfo		
+		call	DrawFileNameColor
 		pop	ix
 
 		call	KbdHit
@@ -1598,6 +1727,28 @@ ReadAllHeadersEnd:
 DontInc:
 	pop	bc
 	jr	ReadAllHeadersEnd
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+;OUT: A = number of tagged files
+CountTaggedFiles:
+	ld	hl, FileCache + CACHE_FLAG
+	ld	de, CACHE_SZ
+	ld	a, (FileCnt)
+	ld	b, a
+	ld	c, 0
+	
+CountTaggedFilesLoop:	
+	ld	a, (hl)
+	and	CACHE_FLAG_TAGGED	
+	jr	z, CountTaggedFilesLoopNext
+	inc	c
+CountTaggedFilesLoopNext:	
+	or	a
+	add	hl, de
+	djnz	CountTaggedFilesLoop
+	
+	ld	a, c	
+	ret	
 		
 ;Includes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1651,7 +1802,10 @@ MsgFileStart		DEFM		'Start   :'
 MsgFileStartN		ABYTEC 0 	'65535  '
 MsgReadingExt		ABYTEC 0 	'Reading header'
 MsgClear		ABYTEC 0 	'                '
-MsgDelete		ABYTEC 0 	'Del file? y/n'
+MsgDelete		DEFM	 	'Delete '
+MsgDeleteX		ABYTEC 0	'xxx files'
+MsgSetAttrCount		DEFM		'Attr. '
+MsgSetAttrCountX	ABYTEC 0	'xxx files'
 MsgSetRO		ABYTEC 0 	'Set R/O? y/n'
 MsgSetSYS		ABYTEC 0 	'Set HID? y/n'
 MsgNewFileName		ABYTEC 0 	'Name?none=abort:'
@@ -1688,7 +1842,6 @@ MsgFileExists		ABYTEC 0 	'File name exists'
 MsgInsertSrcDsk		ABYTEC 0 	'Put SOURCE disk'
 MsgInsertDstDsk		ABYTEC 0 	'Put DEST. disk '
 MsgPressAnyKey		ABYTEC 0 	'Press any key'
-MsgCopySectors		ABYTEC 0 	'000 sectors copy'
 MsgAreYouSure		ABYTEC 0 	'Are you sure?y/n'
 MsgViewFileMenu		ABYTEC 0 	'View file menu:'
 MsgViewFileText		ABYTEC 0 	'1.As text'
@@ -1698,6 +1851,12 @@ MsgViewFileAuto		ABYTEC 0 	'3.Auto-1/2/BASIC'
 MsgErrFileTooBig	ABYTEC 0 	'File too big'
 MsgFileName		DEFM		'Name: '
 MsgFileNameN		DEFM		'          '
+MsgCopyFiles		DEFM	 	'Copy '
+MsgCopyFilesX		ABYTEC 0	'xxx files'
+MsgCopyFileName		DEFM		'Copy '
+MsgCopyFileNameName	ABYTEC 0	'xxxxxxxxxxx'
+
+CONFIRM_KEY		EQU		'y'
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	ELSE
@@ -1737,9 +1896,12 @@ MsgFileStart		DEFM		'Start   :'
 MsgFileStartN		ABYTEC 0 	'65535   '
 MsgReadingExt		ABYTEC 0 	'Citesc antet...'
 MsgClear		ABYTEC 0 	'                '
-MsgDelete		ABYTEC 0 	'Sterg fis.? y/n'
-MsgSetRO		ABYTEC 0 	'Setare R/O? y/n'
-MsgSetSYS		ABYTEC 0 	'Setare HID? y/n'
+MsgDelete		DEFM	 	'Sterg '
+MsgDeleteX		ABYTEC 0	'xxx fis.'
+MsgSetAttrCount		DEFM		'Atrib. '
+MsgSetAttrCountX	ABYTEC 0	'xxx fis.'
+MsgSetRO		ABYTEC 0 	'Setare R/O? d/n'
+MsgSetSYS		ABYTEC 0 	'Setare HID? d/n'
 MsgNewFileName		ABYTEC 0 	'Nume?gol=renunt'
 MsgMenuDiskCopy		ABYTEC 0 	'Meniu disc:'
 MsgMenuFileCopy		ABYTEC 0 	'Meniu copiere:'
@@ -1769,13 +1931,12 @@ MsgMenuFmt1		ABYTEC 0 	'5.Formatare A:'
 MsgMenuFmt2		ABYTEC 0 	'6.Formatare B:'
 
 MsgBlocksLeft		ABYTEC 0 	'000 blocuri ram.'
-MsgFileOverwrite	ABYTEC 0 	'Suprascriu? y/n'
+MsgFileOverwrite	ABYTEC 0 	'Suprascriu? d/n'
 MsgFileExists		ABYTEC 0 	'Numele exista!'
 MsgInsertSrcDsk		ABYTEC 0 	'Intr. disc SURSA'
 MsgInsertDstDsk		ABYTEC 0 	'Intr. disc DEST.'
 MsgPressAnyKey		ABYTEC 0 	'Apasa o tasta'
-MsgCopySectors		ABYTEC 0 	'000 sect. copiat'
-MsgAreYouSure		ABYTEC 0 	'Confirmati? y/n'
+MsgAreYouSure		ABYTEC 0 	'Confirmati? d/n'
 MsgViewFileMenu		ABYTEC 0 	'Meniu viz. fis.:'
 MsgViewFileText		ABYTEC 0 	'1.Ca text'
 MsgViewFileHex		ABYTEC 0 	'2.Ca hexa'
@@ -1784,6 +1945,12 @@ MsgViewFileAuto		ABYTEC 0 	'3.Auto-1/2/BASIC'
 MsgErrFileTooBig	ABYTEC 0 	'Fisier prea mare'
 MsgFileName		DEFM		'Nume: '
 MsgFileNameN		DEFM		'          '	
+MsgCopyFiles		DEFM	 	'Copiez '
+MsgCopyFilesX		ABYTEC 0	'xxx fis.'
+MsgCopyFileName		DEFM		'Cop. '
+MsgCopyFileNameName	ABYTEC 0	'xxxxxxxxxxx'
+
+CONFIRM_KEY		EQU		'd'
 	
 	ENDIF
 	

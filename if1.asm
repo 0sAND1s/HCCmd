@@ -152,9 +152,11 @@ CH_DMA	EQU CH_DATA - CH_FCB	;offset of DMA from start of FCB
 CACHE_NAME		EQU	0			;11B
 CACHE_FIRST_AU	EQU	NAMELEN		;2B
 CACHE_AU_CNT	EQU	CACHE_FIRST_AU + 2	;2B
-CACHE_FLAG	EQU CACHE_AU_CNT + 2	;1B
+CACHE_FLAG	EQU	CACHE_AU_CNT + 2	;1B
 CACHE_HDR	EQU	CACHE_FLAG + 1	;9B
-CACHE_SZ		EQU	25			;11 + 2 + 2 + 1 + 9
+CACHE_SZ	EQU	25			;11 + 2 + 2 + 1 + 9
+CACHE_FLAG_HDR_READ	EQU	1
+CACHE_FLAG_TAGGED	EQU	2
 
 LOAD_ADDR	EQU	2625	;address of the load procedure in IF1 ROM
 
@@ -383,7 +385,7 @@ CopyDiskLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr	
 	
 	;Calculate how many blocks to read = min(MAX_AU_RAM, blocks left)
@@ -531,7 +533,7 @@ CopyDiskToCOMLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr			
 	
 	;Read block into buffer
@@ -591,7 +593,7 @@ CopyDiskFromCOMLoop:
 	call	Byte2Txt
 	ld	hl, MsgBlocksLeft
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr			
 	
 	;Read block buffer
@@ -830,8 +832,8 @@ CacheNotFinished:
 	;ld	ix, (SelFileCache)
 ReadFileHeader:
 	ld	a, (ix + CACHE_FLAG)
-	or	a
-	ret		nz		;return if already read
+	and	CACHE_FLAG_HDR_READ
+	ret	nz		;return if already read
 
 	ld	l, (ix + CACHE_FIRST_AU)
 	ld	h, (ix + CACHE_FIRST_AU + 1)
@@ -880,7 +882,9 @@ ReadFileHeaderIsTextFile:
 	ld	(ix + CACHE_HDR + HDR_TYPE), a
 	
 ReadHeaderEnd:
-	inc	(ix + CACHE_FLAG)
+	ld	a, (ix + CACHE_FLAG)
+	or	CACHE_FLAG_HDR_READ
+	ld	(ix + CACHE_FLAG), a
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

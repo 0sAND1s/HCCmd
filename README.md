@@ -7,10 +7,16 @@ The main features of this program are:
 - File listing works for up to 128 files (maximum supported by the file system).
 - File properties are shown: size on disk, logical size, file type, file attributes, start address of code blocks/start line of program blocks.
 - Disk properties are shown: selected drive (A/B), free space, number of files, total space occupied by files.
-- File operations are: view file, read properties from file header, copy, rename, change attributes, delete.
+- File operations are: view file, read properties from file header, copy files, rename file, change file attributes, delete files.
 - Files of any size can be viewed as text or as hex, using up/down scrolling. Program files can also be shown as decoded BASIC code.
 - File copy operations support: dual drive copy, single drive copy, from disk to serial port, from serial port to disk, from tape to disk, from disk to tape.
 - Disk operations supported: disk copy dual drive, disk copy single drive, disk copy to serial port, disk copy from serial port, format A:/B:.
+- Multiple file selection is supported for file copy single drive, file copy dual drive, file delete, file attribute change.
+
+Main windows - with file tagging and program file highlight - latest color scheme
+
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/Main.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/MainRO.gif)
 
 
 File copy menu
@@ -53,13 +59,14 @@ Options:
 	- 2 - Shows file as hex
 	- 3 - Auto - depending on file type, it shows file as text or hex or decoded BASIC program.
 		
-4 - Read selected file properties from file header: type, start address/line, BASIC lenght
+4 - Read file properties from file header: type, start address/line, BASIC lenght; automatically advances to the next file. 
+	If the file is of type program, it is highlighted in red.
 
 5 - Copy - file copy menu shows up
 	
  	- 0 - Exit copy menu
-	- 1 - Copy selected file from current drive to current drive, asking for disk change confirmation between source and destination disks
-	- 2 - Copy selected file from one drive to the other, from A: to B: or from B: to A:
+	- 1 - Copy selected file or all marked files from current drive to current drive, asking for disk change confirmation between source and destination disks
+	- 2 - Copy selected file or all marked files from one drive to the other, from A: to B: or from B: to A:
 	- 3 - Copy selected file from current drive to the COM port. In HCDisk the command is 'getif1 filename COM1 19200' for example.
 	- 4 - Copy from the COM port to the current drive. New file name will be asked for. In HCDisk the command is 'putif1 filename COM1 19200' for example.
 	- 5 - Copy block from tape to disk file.
@@ -70,9 +77,9 @@ Options:
 
 6 - Rename selected file. The program will check if a file with that name already exists and will abort if it does.
 
-7 - Set/reset file attributes for the selected file: Read Only, Hidden attributes
+7 - Set/reset file attributes for the selected file or for all marked files: Read Only, Hidden attributes
 
-8 - Delete selected file. If file is marked as read only, an error will be displayed. R/O attribute must be
+8 - Delete selected file or all marked files. If file has the read only attribute set, an error will be displayed. R/O attribute must be
 cleared before deleting.
 
 9 - Disk menu - efficient disk copy, only occupied disk area is copied
@@ -95,7 +102,7 @@ Enter - Process selected file:
       
 Cursor - move selection on screen
 
-Space - continuously read file headers for all files on disk.
+Space - mark file for copy/delete/change attributes; the marked files are highlighted in yellow.
 
 
 How to transfer the binary:
@@ -112,5 +119,4 @@ How to copy HC BASIC disks over serial cable (COM port):
 4. Run the latest HCCmd version and use menu '9-Disk', then option '3. Copy A:->COM' to copy from HC to PC or option '4. Copy COM->A:' to copy from PC to HC.
 5. A message will show on PC and on HC showing how many blocks are left to copy. A full disk takes about 7 minutes to copy.
 
-Planned features:
-- Allow selection of multiple files, for operations like delete, copy, attribute change.
+Thanks to the users who contributed with testing and/or feature requests: Ioan ALEODOR, Vlad Shoby, Adrian-Iulian Mitrofan-Bitca and others.

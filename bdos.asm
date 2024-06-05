@@ -306,68 +306,31 @@ RenameFile:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 PromptDiskChangeDst:
 	ld	hl, MsgInsertDstDsk
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	ld	hl, MsgPressAnyKey
-	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_LBL_CLR
+	ld	de, LST_LINE_MSG + 3 << 8
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar	
 	ret
 	
 PromptDiskChangeSrc:
 	ld	hl, MsgInsertSrcDsk
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	ld	hl, MsgPressAnyKey
-	ld	de, LST_LINE_MSG + 2 << 8
-	ld	a, SCR_LBL_CLR
+	ld	de, LST_LINE_MSG + 3 << 8
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar	
 	ret
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;HL = source file name, A = source drive
-;Use cases:
-;1. Copy from A: to B: or B: to A:.
-;2. Copy from A: to A:, from B: to B: with alternating disks (single drive) - asks for disk swap.
-;3. Copy from A:/B: to COM.
-;4. Copy from COM to A:/B:.
-;Single drive scenario: 
-;1. Read first file part, 
-;2. Ask for dest disk, 
-;3. check if file exists/ask for overwrite, 
-;4. create empty dest file, 
-;5. write first file part, 
-;6. enter copy loop: ask for SRC disk, read file part, ask for DST disk, write file part, check end, loop.
-CopyFile:				
-	ld 	a, (RWTSDrive)
-	inc	a				;Convert to BASIC drive number: 1,2
-	ld	(CopyFileSrcDrv), a
-	ld	(CopyFileDstDrv), a
-	ld	de, CopyFileSrcName
-	ld	bc, NAMELEN
-	push	hl
-	push	bc
-	ldir	
-	pop	bc
-	pop	hl	
-	ld	de, CopyFileDstName
-	ldir		
-	
-	;Reset R/O attribute for destination, to allow file write.
-	ld	a, (CopyFileDstName+RO_POS)
-	res	7, a
-	ld	(CopyFileDstName+RO_POS), a
-	
-	xor	a
-	ld	(CopyFileRes), a	
-	ld	de, 0
-	ld	(FilePosRead), de	
-	ld	(FilePosWrite), de	
-
+CopyFilePrintMenu:
 	ld	a, (CopyFileSrcDrv)
 	add	'A'-1
 	;Update menu messages with current drive.
@@ -386,7 +349,7 @@ CopyFile:
 	
 	ld	hl, MsgMenuFileCopy
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	ld	hl, MsgMenuBack
 	ld	de, LST_LINE_MSG + 2 << 8
@@ -417,8 +380,59 @@ CopyFile:
 		ld	b, 8
 		call	ClearNMsgLines
 	pop	af
+	
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;IN: HL = file name
+CopyFileInit:
+	ld 	a, (RWTSDrive)
+	inc	a				;Convert to BASIC drive number: 1,2
+	ld	(CopyFileSrcDrv), a
+	ld	(CopyFileDstDrv), a	
+	ld	de, CopyFileSrcName
+	ld	bc, NAMELEN
+	push	hl
+	push	bc
+	ldir	
+	pop	bc
+	pop	hl	
+	ld	de, CopyFileDstName
+	ldir		
+	
+	;Reset R/O attribute for destination, to allow file write.
+	ld	a, (CopyFileDstName+RO_POS)
+	res	7, a
+	ld	(CopyFileDstName+RO_POS), a
+	
+	xor	a
+	ld	(CopyFileRes), a	
+	ld	de, 0
+	ld	(FilePosRead), de	
+	ld	(FilePosWrite), de	
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;Use cases:
+;1. Copy from A: to B: or B: to A:.
+;2. Copy from A: to A:, from B: to B: with alternating disks (single drive) - asks for disk swap.
+;3. Copy from A:/B: to COM.
+;4. Copy from COM to A:/B:.
+;Single drive scenario: 
+;1. Read first file part, 
+;2. Ask for dest disk, 
+;3. check if file exists/ask for overwrite, 
+;4. create empty dest file, 
+;5. write first file part, 
+;6. enter copy loop: ask for SRC disk, read file part, ask for DST disk, write file part, check end, loop.
+CopyFile:		
+	ld	hl, (SelFileCache)
+	call	CopyFileInit
+	call	CopyFilePrintMenu
 		
-	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file			
+	;1=single drive copy, 2=dual drive copy, 3=from file to COM, 4=from COM to file, 5=from tape to disk, 6=from disk to tape
 	cp	'0'
 	jr	nz, CopyFileNotExit
 	pop	hl	
@@ -461,11 +475,11 @@ CopyFileCheckOverwrite:
 CopyFileCheckOverwriteAsk:	
 	;Ask overwrite confirmation.
 	ld	hl, MsgFileOverwrite
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar	
-	cp	'y'
+	cp	CONFIRM_KEY
 	ret						;return Z=1 when user confirmed file overwrite
 	
 
@@ -491,6 +505,65 @@ CopyFileCreateNewFile:
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 CopyFileSameDrive:	
+	ld	ix, MsgCopyFilesX
+	ld	hl, MsgCopyFiles
+	call	PrintSelectedFilesMsg
+	ret	nz
+	
+	ld	a, b
+	or	a
+	jr	z, CopyFileSameDriveMain
+	
+	ld	ix, FileCache
+	ld	b, MAX_EXT_CNT		
+CopyFileSameDriveTaggedFilesLoop:	
+	ld	a, (ix + CACHE_FLAG)	
+	and	CACHE_FLAG_TAGGED	
+	jr	nz, CopyFileSameDriveTaggedFilesTagged	
+	
+	ld	de, CACHE_SZ
+	add	ix, de	
+	djnz	CopyFileSameDriveTaggedFilesLoop
+	ret
+	
+CopyFileSameDriveTaggedFilesTagged:
+	push	ix	
+		push	ix
+		pop	hl	
+		push	bc	
+			call	CopyFileInit		
+			call	CopyFileSameDriveMain		
+		pop	bc						
+			
+CopyFileSameDriveTaggedFilesTaggedLastFile			
+	pop	ix
+	ld	de, CACHE_SZ
+	add	ix, de	
+	djnz	CopyFileSameDriveTaggedFilesLoop	
+	ret	
+
+CopyFileSameDriveMain:
+	;Display file name to be copied.
+	ld	hl, CopyFileSrcName	
+	ld	de, MsgCopyFileNameName
+	ld	bc, NAMELEN
+	ldir		
+	;Mark end of string manually.
+	dec	de
+	ld	a, (de)
+	or	$80
+	ld	(de), a
+	
+	ld	hl, MsgCopyFileName
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_ASK_CLR
+	call	PrintStrClr
+	
+	;Prompt for SRC disk change.
+	call	PromptDiskChangeSrc
+	ld	a, (RWTSDrive)		
+	call	BDOSInit
+
 	;Read first file section from SRC.
 	ld	a, (CopyFileSrcDrv)
 	ld	hl, CopyFileSrcName
@@ -503,10 +576,7 @@ CopyFileSameDrive:
 	;Prompt for DST disk change.
 	call	PromptDiskChangeDst
 	ld	a, (RWTSDrive)		
-	call	BDOSInit
-	
-	ld	b, 2
-	call	ClearNMsgLines
+	call	BDOSInit	
 	
 	call	CopyFileCheckOverwrite
 	ret	nz						
@@ -514,17 +584,7 @@ CopyFileSameDrive:
 	call	CopyFileCreateNewFile
 	ret	z		
 	
-CopyFileSameDriveLoop:			
-	ld	a, (CopyFileSectCnt)
-	ld	l, a
-	ld	h, 0
-	ld	de, MsgCopySectors
-	call	Byte2Txt
-	ld	hl, MsgCopySectors
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
-	call	PrintStrClr
-
+CopyFileSameDriveLoop:				
 	ld	a, (CopyFileRes)		;Save read status code.
 	push	af
 		ld	a, (CopyFileDstDrv)
@@ -536,15 +596,11 @@ CopyFileSameDriveLoop:
 	or	l
 	ret	nz						;Exit if read or write had error. Error 1 on read means EOF (some data might still be read).
 	
-			
 	;Prompt for SRC disk change.
 	call	PromptDiskChangeSrc
 	ld	a, (RWTSDrive)		
 	call	BDOSInit
-	
-	ld	b, 2
-	call	ClearNMsgLines
-
+		
 	ld	a, (CopyFileSrcDrv)
 	ld	hl, CopyFileSrcName
 	ld	b, MAX_SECT_BUF
@@ -557,19 +613,68 @@ CopyFileSameDriveLoop:
 	call	PromptDiskChangeDst
 	ld	a, (RWTSDrive)		
 	call	BDOSInit
-	
-	ld	b, 2
-	call	ClearNMsgLines
-	
+		
 	jr	CopyFileSameDriveLoop
 		
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 		
-CopyFileDualDrive:	
+CopyFileDualDrive:			
+	ld	ix, MsgCopyFilesX
+	ld	hl, MsgCopyFiles
+	call	PrintSelectedFilesMsg
+	ret	nz
+	
+	ld	a, b
+	or	a
+	jr	z, CopyFileDualDriveMain
+	
+	ld	ix, FileCache
+	ld	b, MAX_EXT_CNT		
+CopyFileDualDriveTaggedFilesLoop:	
+	ld	a, (ix + CACHE_FLAG)	
+	and	CACHE_FLAG_TAGGED	
+	jr	nz, CopyFileDualDriveTaggedFilesTagged	
+	
+	ld	de, CACHE_SZ
+	add	ix, de	
+	djnz	CopyFileDualDriveTaggedFilesLoop
+	ret
+	
+CopyFileDualDriveTaggedFilesTagged:		
+	push	ix	
+		push	ix
+		pop	hl	
+		push	bc							
+			call	CopyFileInit
+			call	CopyFileDualDriveMain		
+		pop	bc
+	pop	ix
+	ld	de, CACHE_SZ
+	add	ix, de	
+	djnz	CopyFileDualDriveTaggedFilesLoop	
+	ret
+
+CopyFileDualDriveMain:
+	;Display file name to be copied.
+	ld	hl, CopyFileSrcName	
+	ld	de, MsgCopyFileNameName
+	ld	bc, NAMELEN
+	ldir		
+	;Mark end of string manually.
+	dec	de
+	ld	a, (de)
+	or	$80
+	ld	(de), a
+	
+	ld	hl, MsgCopyFileName
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_ASK_CLR
+	call	PrintStrClr	
+	
 	ld	a, (CopyFileSrcDrv) 	
 	xor	%11	
 	ld	(CopyFileDstDrv), a	
-	
+
 	call	CopyFileCheckOverwrite
 	ret	nz
 	
@@ -583,16 +688,7 @@ CopyFileDualDriveLoop:
 	call	ReadFileSection	
 	ld	a, (CopyFileSectCnt)
 	or	a
-	ret	z	
-	
-	ld	a, (CopyFileSectCnt)
-	ld	l, a
-	ld	h, 0
-	ld	de, MsgCopySectors
-	call	Byte2Txt
-	ld	hl, MsgCopySectors
-	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ret	z		
 		
 	ld	a, (CopyFileRes)
 	push	af
@@ -652,7 +748,7 @@ CopyFileFromCOM:
 	;Must ask for the new file name and check to not exist.	
 	ld	hl, MsgNewFileName
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 	ld	hl, MsgClear
@@ -994,7 +1090,7 @@ CopyFileFromTapeRestorePartEnd:
 	
 CopyFileFromTapeError:	
 	ld	de, LST_LINE_MSG + 6 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	call	ReadChar
 	ret
@@ -1010,7 +1106,7 @@ CopyFileToTape:
 	;Read header for file size.
 	ld	ix, (SelFileCache)
 	ld	a, (ix + CACHE_FLAG)
-	or	a
+	and	CACHE_FLAG_HDR_READ
 	call	z, ReadFileHeader
 	
 	;Don't accept untyped files.

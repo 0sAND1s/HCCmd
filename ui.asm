@@ -80,8 +80,11 @@ KEY_ENTER	EQU	13
 KEY_CTRL	EQU	14
 
 SCR_DEF_CLR	EQU INK_CYAN | PAPER_BLACK | CLR_BRIGHT
-SCR_SEL_CLR	EQU INK_BLACK | PAPER_GREEN | CLR_BRIGHT
-SCR_LBL_CLR	EQU SCR_SEL_CLR
+SCR_SEL_CLR	EQU INK_CYAN | PAPER_BLUE | CLR_BRIGHT
+SCR_LBL_CLR	EQU INK_CYAN | PAPER_BLUE
+SCR_ASK_CLR	EQU SCR_DEF_CLR | CLR_FLASH | CLR_BRIGHT
+SCR_TAG_CLR	EQU INK_YELLOW | PAPER_BLACK | CLR_BRIGHT
+SCR_PROG_CLR	EQU INK_RED | PAPER_BLACK | CLR_BRIGHT
 
 ;Special formating chars
 CHR_CR		EQU	13
@@ -149,7 +152,7 @@ InitFonts:
 	ENDIF
 
 ClrScr:
-	ld	hl, (CurrScrAddr)
+	ld	hl, SCR_ADDR
 	ld	d, h
 	ld	e, l
 	inc	de
@@ -250,7 +253,7 @@ PrintStrClr:
 
 		ld	h, 0
 		add	hl, de
-		ld	de, (CurrScrAttrAddr)
+		ld	de, SCR_ATTR_ADDR
 		add	hl, de
 	ex	af, af'
 	ld	c, a
@@ -259,7 +262,7 @@ PrintStrClr:
 	ld	e, l
 	inc 	de
 StrClr	EQU	$ + 1
-	ld	(hl), INK_BLACK | PAPER_CYAN
+	ld	(hl), SCR_SEL_CLR
 	ldir
 	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -377,17 +380,83 @@ DrawVLinesLoop:
 ;IN: A = color mask
 DrawCursor:
 	ld	de, (CursorAddr)
-	ld	b, 	(NAMELEN + 1)/2
+	ld	b, (NAMELEN + 1)/2
 DrawCursorLoop:
 	ld	(de), a
-	inc de
-	djnz DrawCursorLoop
+	inc	de
+	djnz	DrawCursorLoop
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;IN:	A = file index for the newly selected file.
+MoveCursor:	
+	;clear old cursor			
+	push	af			
+		xor	a
+		call	DrawFileNameColor	
+	pop	af
+	
+	;draw new cursor
+	ld	a, (SelFile)
+	call	GetCursorAddr	
+	ld	a, (SelFile)
+	call	CalcFileCache
+	ld	a, 1
+	call	DrawFileNameColor
+
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;IN: A=1 for selected color/0 for unselected color. SelFileCache = file cache entry. (CursorAddr) = cursor address.
+;Color is set to one of 4 options: 
+;normal - CYAN ink
+;tagged - RED ink
+;program type - MAGENTA ink
+;selected - GREEN background over existing ink color
+DrawFileNameColor:	
+	ex	af, af'			;Save selected file flag.
+	
+	ld	ix, (SelFileCache)	
+	
+	;Check if file was tagged.
+	ld	a, (ix + CACHE_FLAG)
+	and	CACHE_FLAG_TAGGED
+	jr	z, DrawFileNameColorNotTagged
+	
+	ld	l, SCR_TAG_CLR
+	jr	DrawFileNameColorDoIt
+	
+DrawFileNameColorNotTagged:
+	;Check if file header was read and file type is program.
+	ld	a, (ix + CACHE_FLAG)
+	and	CACHE_FLAG_HDR_READ
+	jr	z, DrawFileNameColorNotProgram
+	ld	a, (ix + CACHE_HDR + HDR_TYPE)	
+	cp	PROG_TYPE
+	jr	nz, DrawFileNameColorNotProgram
+	ld	l, SCR_PROG_CLR
+	jr	DrawFileNameColorDoIt
+	
+DrawFileNameColorNotProgram:
+	ld	l, SCR_DEF_CLR
+	
+DrawFileNameColorDoIt:
+	ex	af, af'	
+	or	a
+	ld	a, l
+	jr	z, DrawFileNameColorDoItNotSelected	
+	or	PAPER_BLUE
+	
+DrawFileNameColorDoItNotSelected:	
+	call	DrawCursor
+	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;IN:	A = file idx.
-MoveCursor:
+GetCursorAddr:
 	;File idx / SCR_LINES => cursor line & column
 	ld	l, a
 	ld	h, 0
@@ -398,8 +467,8 @@ MoveCursor:
 	add	LST_FIRST_LINE
 
 
-	ld d, h
-	ld e, l
+	ld	d, h
+	ld	e, l
 	ld	hl, 0
 
 	;line*32
@@ -421,21 +490,13 @@ MoveCursor:
 	add	hl, de
 
 	ld	de, LST_FIRST_COL/2
-	ld	bc, (CurrScrAttrAddr)
+	ld	bc, SCR_ATTR_ADDR
 	add	hl, de
 	add	hl, bc
-
-	;clear old cursor
-	ld	a, SCR_DEF_CLR
-	call	DrawCursor
-
-	;draw new one
-	ld	(CursorAddr), hl
-	ld	a, SCR_SEL_CLR
-	call	DrawCursor
-
-	ret
-
+	ld	(CursorAddr), hl		
+	
+	ret	
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 PrintChar:
@@ -449,7 +510,7 @@ PrintChar:
     RR      C                                       ;mark odd/even column
     LD      A, D                            ;A = line
     AND 24                                  ;keep only %00011000
-    ld	hl, (CurrScrAddr)
+    ld	hl, SCR_ADDR
     OR      h							;add screen start address
     LD      H, A                            ;save H
     LD      A, D                            ;A = line
@@ -768,10 +829,52 @@ Bin2HexStrLoop:
 	;TODO: Clean up part of the line that is past the end of file.
 		
 	
-	ret	
+	ret
+	
 
-CurrScrAddr	DEFW	SCR_ADDR
-CurrScrAttrAddr	DEFW	SCR_ATTR_ADDR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;IN: IX = dest count as string, HL = message to display
+;OUT: Z=1 if confirmed, B = how many files were selected (possibly 0)
+PrintSelectedFilesMsg:
+	push	hl
+		call	CountTaggedFiles		
+		or	a
+		push	af
+		jr	nz, PrintSelectedFilesMsgFilesSelected
+		inc	a				;Set attributes for just 1 file, the one under cursor.
+	
+PrintSelectedFilesMsgFilesSelected:	
+		ld	de, PRN_BUF
+		ld	l, a
+		ld	h, 0	
+		call	Byte2Txt		
+		ld	a, (PRN_BUF + 0)
+		ld	(ix), a
+		ld	a, (PRN_BUF + 1)
+		ld	(ix+1), a
+		ld	a, (PRN_BUF + 2)
+		ld	(ix+2), a
+	pop	af
+	pop	hl
+	push	af	
+	ld	de, LST_LINE_MSG + 1 << 8
+	ld	a, SCR_ASK_CLR
+	call	PrintStrClr
+	ld	hl, MsgAreYouSure
+	ld	de, LST_LINE_MSG + 2 << 8
+	ld	a, SCR_ASK_CLR
+	call	PrintStrClr
+	call	ReadChar
+	push	af
+		ld	b, 2
+		call	ClearNMsgLines
+	pop	af
+	cp	CONFIRM_KEY
+	pop	bc
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 HexOffsetHi	DEFB	$AB
 HexOffset	DEFW	$CDEF
 

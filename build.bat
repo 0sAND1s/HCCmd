@@ -5,7 +5,7 @@ set name=hccmd
 REM Set devel=1 if running on Spectaculator, it will store the fonts in the final binary and won't produce the DSK.
 set devel=0
 REM Startup address is configured here. Setting it too low causes issues.
-set RUN_ADDR=27500
+set RUN_ADDR=30000
 REM Variables zone can be set after the code or if the code is put in upper RAM, variables are put in lower RAM.
 set VAR_START=EndCode
 
@@ -28,6 +28,7 @@ REM compress main program and produce final binary
 zx0.exe -f %name%.bin %name%.zx0
 if [%devel%]==[0] zx0.exe -f %name%RO.bin %name%RO.zx0
 sjasmplus.exe unpack.asm --raw=%name%.unpacker -DRUN_ADDR=%RUN_ADDR%
+if ERRORLEVEL 1 goto :EOF
 copy /b %name%.unpacker + %name%.zx0 %name%.out
 if [%devel%]==[0] copy /b %name%.unpacker + %name%RO.zx0 %name%RO.out
 
@@ -44,5 +45,5 @@ HCDisk2.exe format %name%.dsk -t 2 -y : open %name%.dsk : tapimp %name%.tap : di
 
 REM Put source code, readme in DSK file.
 for %%f in (*.asm;*.md;*.txt;build.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit
-for %%f in (*.scr) do HCDisk2.exe open %name%.dsk : put %%f -t b -s 16384 : exit
+for %%f in (*.scr) do HCDisk2.exe screen 2gif 2gif %%f %%~nf.gif : open %name%.dsk : put %%f -t b -s 16384 : exit
 HCDisk2.exe open %name%.dsk : put LICENSE : dir : exit
