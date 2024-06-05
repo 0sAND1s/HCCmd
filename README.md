@@ -43,7 +43,7 @@ Hex file listing
 
 Text file listing
 
-![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/TextView.gif)
+![ScreenShot](https://raw.githubusercontent.com/0sAND1s/HCCmd/main/TxtView.gif)
 
 
 Required hardware: HC-2000, HC-91+IF1, HC-90+IF1
