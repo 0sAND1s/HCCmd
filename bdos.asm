@@ -721,7 +721,7 @@ CopyFileToCOMLoop:
 	
 	;Send buffer to COM port.
 	ld	hl, FileData
-	ld		b, a				;Sector size is 256.
+	ld	b, a				;Sector size is 256.
 	ld	c, 0
 	call	SERTB		
 	
@@ -925,7 +925,7 @@ CopyFilePtr2 EQU $+2
 CopyFileFromTape:
 	ld	hl, MsgMenuFromTape
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 CopyFileFromTapeLoadHeader:	
@@ -1098,7 +1098,7 @@ CopyFileFromTapeError:
 CopyFileToTape:
 	ld	hl, MsgMenuToTape
 	ld	de, LST_LINE_MSG + 1 << 8
-	ld	a, SCR_LBL_CLR
+	ld	a, SCR_ASK_CLR
 	call	PrintStrClr
 	
 	;Read header for file size.

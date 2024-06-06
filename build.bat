@@ -5,7 +5,7 @@ set name=hccmd
 REM Set devel=1 if running on Spectaculator, it will store the fonts in the final binary and won't produce the DSK.
 set devel=0
 REM Startup address is configured here. Setting it too low causes issues.
-set RUN_ADDR=30000
+set RUN_ADDR=28000
 REM Variables zone can be set after the code or if the code is put in upper RAM, variables are put in lower RAM.
 set VAR_START=EndCode
 

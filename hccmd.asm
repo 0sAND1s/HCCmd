@@ -430,7 +430,8 @@ CheckKeyCopy:
 	
 CopyFileOK:		
 	ld	b, 6
-	call	ClearNMsgLines
+	call	ClearNMsgLines	
+	
 	;Display destination disk after file copy, if on disk copy, (1, 2, 4, 5). Don't reload disk if on option 3, 6.
 	ld	a, (CopySelOption)
 	cp	'3'
@@ -440,7 +441,7 @@ CopyFileOK:
 	
 	ld	a, (CopyFileDstDrv)	
 	dec	a
-	ld	(RWTSDrive), a
+	ld	(RWTSDrive), a	
 	call	BDOSSelectDisk	;Select destination disk after copy, to show the new file list.
 	jp	HCRunInitDisk
 
@@ -1986,9 +1987,9 @@ FilePosWrite		EQU	FilePosRead + 2
 CopyFileSectCnt		EQU	FilePosWrite + 2
 CopyFileSrcDrv		EQU	CopyFileSectCnt + 1
 CopyFileSrcName		EQU	CopyFileSrcDrv + 1
-CopyFileDstDrv		EQU	CopyFileSrcName + 11
+CopyFileDstDrv		EQU	CopyFileSrcName + NAMELEN
 CopyFileDstName		EQU	CopyFileDstDrv + 1
-FirstColumnShown	EQU	CopyFileDstName + 1
+FirstColumnShown	EQU	CopyFileDstName + NAMELEN
 FirstFileShownIdx	EQU	FirstColumnShown + 1
 FileCountOnScreen	EQU	FirstFileShownIdx + 1
 
@@ -2024,7 +2025,7 @@ MAX_SECT_BUF		EQU	FileDataSize/SECT_SZ
 
 
 ;Copy buffer
-CopyDiskBuf		EQU DataBuf
+CopyDiskBuf		EQU	DataBuf
 
 RAM_END			EQU	$FF00				;256 bytes for the stack should be enough.
 MAX_RAM_FREE		EQU	RAM_END - DataBuf
