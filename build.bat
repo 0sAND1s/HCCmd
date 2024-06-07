@@ -29,21 +29,22 @@ zx0.exe -f %name%.bin %name%.zx0
 if [%devel%]==[0] zx0.exe -f %name%RO.bin %name%RO.zx0
 sjasmplus.exe unpack.asm --raw=%name%.unpacker -DRUN_ADDR=%RUN_ADDR%
 if ERRORLEVEL 1 goto :EOF
-copy /b %name%.unpacker + %name%.zx0 %name%.out
+copy /b %name%.unpacker + %name%.zx0 %name%.out > nul
 if [%devel%]==[0] copy /b %name%.unpacker + %name%RO.zx0 %name%RO.out
 
 REM Put binary in TAP file.
 HCDisk2.exe format %name%.tap -y : open %name%.tap : bin2bas var %name%.out run : dir : exit
-if [%devel%]==[0] (HCDisk2.exe open %name%.tap : bin2bas var %name%RO.out runRO : dir : exit)
+if [%devel%]==[0] (HCDisk2.exe open %name%.tap : bin2bas var %name%RO.out runRO : exit) > nul
 
-del %name%.bin %name%.zx0 %name%RO.bin %name%RO.zx0 %name%.out %name%RO.out %name%.unpacker
+del %name%.bin %name%.zx0 %name%RO.bin %name%RO.zx0 %name%.out %name%RO.out %name%.unpacker > nul
 
 if [%SAVE_DSK%]==[0] goto :EOF
 
 REM Put binary in DSK file.
-HCDisk2.exe format %name%.dsk -t 2 -y : open %name%.dsk : tapimp %name%.tap : dir : exit
+if not exist %name%.dsk HCDisk2.exe format %name%.dsk -t 2 -y : exit > nul
+HCDisk2.exe open %name%.dsk : del * -y : tapimp %name%.tap : exit > nul
 
 REM Put source code, readme in DSK file.
-for %%f in (*.asm;*.md;*.txt;build.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit
-for %%f in (*.scr) do HCDisk2.exe screen 2gif 2gif %%f %%~nf.gif : open %name%.dsk : put %%f -t b -s 16384 : exit
+for %%f in (*.asm;*.md;*.txt;build.bat) do HCDisk2.exe open %name%.dsk : put %%f : exit > nul
+for %%f in (*.scr) do HCDisk2.exe screen 2gif 2gif %%f %%~nf.gif : open %name%.dsk : put %%f -t b -s 16384 : exit > nul
 HCDisk2.exe open %name%.dsk : put LICENSE : dir : exit
